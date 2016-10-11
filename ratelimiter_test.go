@@ -141,7 +141,7 @@ var _ = Describe("RatelimiterGo", func() {
 			Expect(err2).ToNot(HaveOccurred())
 			Expect(res2.Remaining).To(Equal(0))
 
-			time.Sleep(res2.Duration)
+			time.Sleep(res2.Duration + time.Millisecond)
 			res3, err3 := limiter.Get(id, policy...)
 			Expect(err3).ToNot(HaveOccurred())
 			Expect(res3.Total).To(Equal(2))
@@ -152,7 +152,7 @@ var _ = Describe("RatelimiterGo", func() {
 			Expect(err4).ToNot(HaveOccurred())
 			Expect(res4.Remaining).To(Equal(0))
 
-			time.Sleep(res4.Duration)
+			time.Sleep(res4.Duration + time.Millisecond)
 			res5, err5 := limiter.Get(id, policy...)
 			Expect(err5).ToNot(HaveOccurred())
 			Expect(res5.Total).To(Equal(1))
@@ -160,7 +160,7 @@ var _ = Describe("RatelimiterGo", func() {
 			Expect(res5.Duration).To(Equal(time.Second))
 
 			// restore after double Duration
-			time.Sleep(res4.Duration * 2)
+			time.Sleep(res4.Duration*2 + time.Millisecond)
 			res6, err6 := limiter.Get(id, policy...)
 			Expect(err6).ToNot(HaveOccurred())
 			Expect(res6.Total).To(Equal(2))
