@@ -4,8 +4,6 @@ The fastest abstract rate limiter, base on go-redis/redis.
 
 [![Build Status][travis-image]][travis-url]
 
-## Node.js version: [thunk-ratelimiter](https://github.com/thunks/thunk-ratelimiter)
-
 ## Requirements
 
 - Redis 2.8+
@@ -31,7 +29,7 @@ func ExampleRatelimiterGo() {
 		Addr: "localhost:6379",
 	})
 
-	limiter, err := ratelimiter.New(client, &ratelimiter.Options{
+	limiter, err := ratelimiter.New(client, ratelimiter.Options{
 		Max:      1000,
 		Duration: time.Minute, // limit to 1000 requests in 1 minute.
 	})
@@ -74,17 +72,21 @@ type Limiter struct {
 Limiter struct.
 
 ```go
-func New(client *redis.Client, opts *Options) (*Limiter, error)
+func New(c *redis.Client, opts Options) (*Limiter, error)
 ```
 New create a limiter with options
 
 ```go
-func (limiter *Limiter) Get(id string, policy ...int) (Result, error)
+func (l *Limiter) Get(id string, policy ...int) (Result, error)
+// res, err := limiter.Get(UserId1)
+// res, err := limiter.Get(UserId2, 100, 60000)
+// res, err := limiter.Get(UserId3, 100, 60000, 50, 60000)
 ```
 Get get a limiter result for id. support custom limiter policy.
 
 ```go
-func (limiter *Limiter) Remove(id string) (int, error)
+func (l *Limiter) Remove(id string) (int, error)
+// res, err := limiter.Remove(UserId1)
 ```
 Remove limiter record for id
 
@@ -105,6 +107,8 @@ type Result struct {
 }
 ```
 Result of limiter
+
+## Node.js version: [thunk-ratelimiter](https://github.com/thunks/thunk-ratelimiter)
 
 
 [travis-url]: https://travis-ci.org/teambition/ratelimiter-go

@@ -13,15 +13,15 @@ func ExampleRatelimiterGo() {
 		Addr: "localhost:6379",
 	})
 
-	limiter, err := ratelimiter.New(client, &ratelimiter.Options{
-		Max:      1000,
-		Duration: time.Minute, // limit to 1000 requests in 1 minute.
+	limiter, err := ratelimiter.New(client, ratelimiter.Options{
+		Max:      10,
+		Duration: time.Second, // limit to 1000 requests in 1 minute.
 	})
 	if err != nil {
 		panic(err)
 	}
 
-	userID := "user-12345"
+	userID := "user-123456"
 	res, err := limiter.Get(userID)
 	if err != nil {
 		panic(err)
@@ -31,7 +31,7 @@ func ExampleRatelimiterGo() {
 	fmt.Println(res.Remaining)
 	fmt.Println(res.Duration)
 	// Output:
-	// 1000
-	// 999
-	// 1m0s
+	// 10
+	// 9
+	// 1s
 }

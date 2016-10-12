@@ -3,6 +3,10 @@ package ratelimiter_test
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
+	"fmt"
+	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,7 +45,7 @@ var _ = Describe("RatelimiterGo", func() {
 		var id string = genID()
 
 		It("ratelimiter.New", func() {
-			res, err := ratelimiter.New(client, &ratelimiter.Options{})
+			res, err := ratelimiter.New(client, ratelimiter.Options{})
 			Expect(err).ToNot(HaveOccurred())
 			limiter = res
 		})
@@ -92,7 +96,7 @@ var _ = Describe("RatelimiterGo", func() {
 		var id string = genID()
 
 		It("ratelimiter.New", func() {
-			res, err := ratelimiter.New(client, &ratelimiter.Options{
+			res, err := ratelimiter.New(client, ratelimiter.Options{
 				Max:      3,
 				Duration: time.Second,
 			})
@@ -168,6 +172,44 @@ var _ = Describe("RatelimiterGo", func() {
 			Expect(res6.Duration).To(Equal(time.Millisecond * 500))
 		})
 	})
+
+	var _ = Describe("ratelimiter.New, Chaos", func() {
+		It("10 limiters work for one id", func() {
+			var wg sync.WaitGroup
+			var id string = genID()
+			var result = NewResult(make([]int, 1000))
+			fmt.Println("res:", len(result.s), cap(result.s))
+
+			var redisOptions = redis.Options{Addr: "localhost:6379"}
+			var limiterOptions = ratelimiter.Options{Max: 999}
+			var worker = func(c *redis.Client, l *ratelimiter.Limiter) {
+				defer wg.Done()
+				defer c.Close()
+
+				for i := 0; i < 100; i++ {
+					res, err := l.Get(id)
+					Expect(err).ToNot(HaveOccurred())
+					result.Push(res.Remaining)
+				}
+			}
+
+			wg.Add(10)
+			for i := 0; i < 10; i++ {
+				client := redis.NewClient(&redisOptions)
+				limiter, err := ratelimiter.New(client, limiterOptions)
+				Expect(err).ToNot(HaveOccurred())
+				go worker(client, limiter)
+			}
+
+			wg.Wait()
+			s := result.Value()
+			sort.Ints(s) // [0 0 1 2 3 ... 997 998]
+			Expect(s[0]).To(Equal(0))
+			for i := 1; i < 1000; i++ {
+				Expect(s[i]).To(Equal(i - 1))
+			}
+		})
+	})
 })
 
 func genID() string {
@@ -177,4 +219,29 @@ func genID() string {
 		panic(err)
 	}
 	return hex.EncodeToString(buf)
+}
+
+type Result struct {
+	i   int
+	len int
+	s   []int
+	m   sync.Mutex
+}
+
+func NewResult(s []int) Result {
+	return Result{s: s, len: len(s)}
+}
+
+func (r *Result) Push(val int) {
+	r.m.Lock()
+	if r.i == r.len {
+		panic(errors.New("Result overflow"))
+	}
+	r.s[r.i] = val
+	r.i++
+	r.m.Unlock()
+}
+
+func (r *Result) Value() []int {
+	return r.s
 }

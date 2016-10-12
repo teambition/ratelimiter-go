@@ -30,10 +30,10 @@ type Result struct {
 }
 
 // New create a limiter with options
-func New(client *redis.Client, opts *Options) (*Limiter, error) {
+func New(c *redis.Client, opts Options) (*Limiter, error) {
 	var limiter *Limiter
 
-	sha1, err := client.ScriptLoad(lua).Result()
+	sha1, err := c.ScriptLoad(lua).Result()
 	if err != nil {
 		return limiter, err
 	}
@@ -50,14 +50,14 @@ func New(client *redis.Client, opts *Options) (*Limiter, error) {
 	if opts.Duration > 0 {
 		duration = strconv.FormatInt(int64(opts.Duration/time.Millisecond), 10)
 	}
-	limiter = &Limiter{redis: client, sha1: sha1, prefix: prefix, max: max, duration: duration}
+	limiter = &Limiter{redis: c, sha1: sha1, prefix: prefix, max: max, duration: duration}
 	return limiter, nil
 }
 
 // Get get a limiter result for id. support custom limiter policy.
-func (limiter *Limiter) Get(id string, policy ...int) (Result, error) {
+func (l *Limiter) Get(id string, policy ...int) (Result, error) {
 	var result Result
-	keys := []string{limiter.prefix + id}
+	keys := []string{l.prefix + id}
 
 	length := len(policy)
 	if odd := length % 2; odd == 1 {
@@ -72,8 +72,8 @@ func (limiter *Limiter) Get(id string, policy ...int) (Result, error) {
 	args := make([]interface{}, capacity, capacity)
 	args[0] = genTimestamp()
 	if length == 0 {
-		args[1] = limiter.max
-		args[2] = limiter.duration
+		args[1] = l.max
+		args[2] = l.duration
 	} else {
 		for i, val := range policy {
 			if val <= 0 {
@@ -83,7 +83,7 @@ func (limiter *Limiter) Get(id string, policy ...int) (Result, error) {
 		}
 	}
 
-	res, err := limiter.redis.EvalSha(limiter.sha1, keys[0:1], args...).Result()
+	res, err := l.redis.EvalSha(l.sha1, keys[0:1], args...).Result()
 	if err != nil {
 		return result, err
 	}
@@ -101,9 +101,9 @@ func (limiter *Limiter) Get(id string, policy ...int) (Result, error) {
 }
 
 // Remove limiter record for id
-func (limiter *Limiter) Remove(id string) (int, error) {
+func (l *Limiter) Remove(id string) (int, error) {
 	var num int
-	res, err := limiter.redis.Del(limiter.prefix + id).Result()
+	res, err := l.redis.Del(l.prefix + id).Result()
 	if err == nil {
 		num = int(reflect.ValueOf(res).Interface().(int64))
 	}
@@ -111,7 +111,7 @@ func (limiter *Limiter) Remove(id string) (int, error) {
 }
 
 func genTimestamp() string {
-	time := time.Now().UnixNano() / int64(time.Millisecond)
+	time := time.Now().UnixNano() / 1e6
 	return strconv.FormatInt(time, 10)
 }
 

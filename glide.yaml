@@ -1,7 +1,0 @@
-package: github.com/teambition/ratelimiter-go
-homepage: https://github.com/teambition/ratelimiter-go
-license: MIT
-owners:
-- name: Yan Qing
-  email: admin@zensh.com
-  homepage: https://github.com/zensh
