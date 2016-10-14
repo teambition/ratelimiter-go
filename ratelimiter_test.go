@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"sort"
 	"sync"
 	"testing"
@@ -177,16 +176,15 @@ var _ = Describe("RatelimiterGo", func() {
 		It("10 limiters work for one id", func() {
 			var wg sync.WaitGroup
 			var id string = genID()
-			var result = NewResult(make([]int, 1000))
-			fmt.Println("res:", len(result.s), cap(result.s))
+			var result = NewResult(make([]int, 10000))
 
 			var redisOptions = redis.Options{Addr: "localhost:6379"}
-			var limiterOptions = ratelimiter.Options{Max: 999}
+			var limiterOptions = ratelimiter.Options{Max: 9999}
 			var worker = func(c *redis.Client, l *ratelimiter.Limiter) {
 				defer wg.Done()
 				defer c.Close()
 
-				for i := 0; i < 100; i++ {
+				for i := 0; i < 1000; i++ {
 					res, err := l.Get(id)
 					Expect(err).ToNot(HaveOccurred())
 					result.Push(res.Remaining)
@@ -203,9 +201,97 @@ var _ = Describe("RatelimiterGo", func() {
 
 			wg.Wait()
 			s := result.Value()
-			sort.Ints(s) // [0 0 1 2 3 ... 997 998]
+			sort.Ints(s) // [0 0 1 2 3 ... 9997 9998]
 			Expect(s[0]).To(Equal(0))
-			for i := 1; i < 1000; i++ {
+			for i := 1; i < 10000; i++ {
+				Expect(s[i]).To(Equal(i - 1))
+			}
+		})
+	})
+
+	var _ = Describe("ratelimiter.RingNew, Chaos", func() {
+		It("10 limiters work for one id", func() {
+			Skip("Can't run in travis")
+
+			var wg sync.WaitGroup
+			var id string = genID()
+			var result = NewResult(make([]int, 10000))
+
+			var redisOptions = redis.RingOptions{Addrs: map[string]string{
+				"a": "localhost:6379",
+				"b": "localhost:6380",
+			}}
+			var limiterOptions = ratelimiter.Options{Max: 9999}
+			var worker = func(c *redis.Ring, l *ratelimiter.Limiter) {
+				defer wg.Done()
+				defer c.Close()
+
+				for i := 0; i < 1000; i++ {
+					res, err := l.Get(id)
+					Expect(err).ToNot(HaveOccurred())
+					result.Push(res.Remaining)
+				}
+			}
+
+			wg.Add(10)
+			for i := 0; i < 10; i++ {
+				client := redis.NewRing(&redisOptions)
+				limiter, err := ratelimiter.RingNew(client, limiterOptions)
+				Expect(err).ToNot(HaveOccurred())
+				go worker(client, limiter)
+			}
+
+			wg.Wait()
+			s := result.Value()
+			sort.Ints(s) // [0 0 1 2 3 ... 9997 9998]
+			Expect(s[0]).To(Equal(0))
+			for i := 1; i < 10000; i++ {
+				Expect(s[i]).To(Equal(i - 1))
+			}
+		})
+	})
+
+	var _ = Describe("ratelimiter.ClusterNew, Chaos", func() {
+		It("10 limiters work for one id", func() {
+			Skip("Can't run in travis")
+
+			var wg sync.WaitGroup
+			var id string = genID()
+			var result = NewResult(make([]int, 10000))
+
+			var redisOptions = redis.ClusterOptions{Addrs: []string{
+				"localhost:7000",
+				"localhost:7001",
+				"localhost:7002",
+				"localhost:7003",
+				"localhost:7004",
+				"localhost:7005",
+			}}
+			var limiterOptions = ratelimiter.Options{Max: 9999}
+			var worker = func(c *redis.ClusterClient, l *ratelimiter.Limiter) {
+				defer wg.Done()
+				defer c.Close()
+
+				for i := 0; i < 1000; i++ {
+					res, err := l.Get(id)
+					Expect(err).ToNot(HaveOccurred())
+					result.Push(res.Remaining)
+				}
+			}
+
+			wg.Add(10)
+			for i := 0; i < 10; i++ {
+				client := redis.NewClusterClient(&redisOptions)
+				limiter, err := ratelimiter.ClusterNew(client, limiterOptions)
+				Expect(err).ToNot(HaveOccurred())
+				go worker(client, limiter)
+			}
+
+			wg.Wait()
+			s := result.Value()
+			sort.Ints(s) // [0 0 1 2 3 ... 9997 9998]
+			Expect(s[0]).To(Equal(0))
+			for i := 1; i < 10000; i++ {
 				Expect(s[i]).To(Equal(i - 1))
 			}
 		})

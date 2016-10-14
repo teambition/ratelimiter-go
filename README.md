@@ -74,7 +74,18 @@ Limiter struct.
 ```go
 func New(c *redis.Client, opts Options) (*Limiter, error)
 ```
-New create a limiter with options
+New create a limiter with a redis client and options
+
+```go
+func ClusterNew(c *redis.ClusterClient, opts Options) (*Limiter, error)
+```
+ClusterNew create a limiter with a redis cluster client and options
+
+```go
+func RingNew(c *redis.Ring, opts Options) (*Limiter, error)
+```
+RingNew create a limiter with a redis ring client and options
+
 
 ```go
 func (l *Limiter) Get(id string, policy ...int) (Result, error)

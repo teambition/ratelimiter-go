@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	redis "gopkg.in/redis.v5"
@@ -12,7 +13,7 @@ import (
 // Limiter struct.
 type Limiter struct {
 	sha1, prefix, max, duration string
-	redis                       *redis.Client
+	redis                       redisClient
 }
 
 // Options for Limiter
@@ -29,11 +30,73 @@ type Result struct {
 	Reset            time.Time
 }
 
-// New create a limiter with options
+type redisClient interface {
+	Del(keys ...string) *redis.IntCmd
+	EvalSha(sha1 string, keys []string, args ...interface{}) *redis.Cmd
+	loadLua() (string, error)
+}
+
+type client struct {
+	*redis.Client
+}
+
+func (c *client) loadLua() (string, error) {
+	return c.ScriptLoad(lua).Result()
+}
+
+// New create a limiter with a redis client and options
 func New(c *redis.Client, opts Options) (*Limiter, error) {
+	return newLimiter(&client{c}, opts)
+}
+
+type clusterClient struct {
+	*redis.ClusterClient
+}
+
+func (c *clusterClient) loadLua() (string, error) {
+	// ForEachMaster(fn func(client *Client) error) error
+	var sha1 string
+	err := c.ForEachMaster(func(client *redis.Client) error {
+		res, err := client.ScriptLoad(lua).Result()
+		if err == nil {
+			sha1 = res
+		}
+		return err
+	})
+	return sha1, err
+}
+
+// ClusterNew create a limiter with a redis cluster client and options
+func ClusterNew(c *redis.ClusterClient, opts Options) (*Limiter, error) {
+	return newLimiter(&clusterClient{c}, opts)
+}
+
+type ringClient struct {
+	*redis.Ring
+}
+
+func (c *ringClient) loadLua() (string, error) {
+	// ForEachMaster(fn func(client *Client) error) error
+	var sha1 string
+	err := c.ForEachShard(func(client *redis.Client) error {
+		res, err := client.ScriptLoad(lua).Result()
+		if err == nil {
+			sha1 = res
+		}
+		return err
+	})
+	return sha1, err
+}
+
+// RingNew create a limiter with a redis ring client and options
+func RingNew(c *redis.Ring, opts Options) (*Limiter, error) {
+	return newLimiter(&ringClient{c}, opts)
+}
+
+func newLimiter(c redisClient, opts Options) (*Limiter, error) {
 	var limiter *Limiter
 
-	sha1, err := c.ScriptLoad(lua).Result()
+	sha1, err := c.loadLua()
 	if err != nil {
 		return limiter, err
 	}
@@ -83,10 +146,11 @@ func (l *Limiter) Get(id string, policy ...int) (Result, error) {
 		}
 	}
 
-	res, err := l.redis.EvalSha(l.sha1, keys[0:1], args...).Result()
+	res, err := l.getLimit(keys[0:1], args...)
 	if err != nil {
 		return result, err
 	}
+
 	arr := reflect.ValueOf(res)
 	timestamp := arr.Index(3).Interface().(int64)
 	sec := timestamp / 1000
@@ -110,9 +174,30 @@ func (l *Limiter) Remove(id string) (int, error) {
 	return num, err
 }
 
+func (l *Limiter) getLimit(keys []string, args ...interface{}) (res interface{}, err error) {
+	res, err = l.redis.EvalSha(l.sha1, keys, args...).Result()
+	if err != nil && isNoScriptErr(err) {
+		// try to load lua for cluster client and ring client for nodes changing.
+		_, err = l.redis.loadLua()
+		if err == nil {
+			res, err = l.redis.EvalSha(l.sha1, keys, args...).Result()
+		}
+	}
+	return
+}
+
 func genTimestamp() string {
 	time := time.Now().UnixNano() / 1e6
 	return strconv.FormatInt(time, 10)
+}
+
+func isNoScriptErr(err error) bool {
+	var no bool
+	s := err.Error()
+	if strings.HasPrefix(s, "NOSCRIPT ") {
+		no = true
+	}
+	return no
 }
 
 // copy from ./ratelimiter.lua
