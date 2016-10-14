@@ -19,6 +19,14 @@ or
 go get github.com/teambition/ratelimiter-go
 ```
 
+## Try HTTP Server Demo
+
+Try in `github.com/teambition/ratelimiter-go` directory:
+```sh
+go run ratelimiter/main.go
+```
+Visit: http://127.0.0.1:8080/
+
 ## Example
 
  Example Connect middleware implementation limiting against a `user._id`:
