@@ -209,7 +209,7 @@ var _ = Describe("RatelimiterGo", func() {
 		})
 	})
 
-	var _ = Describe("ratelimiter.RingNew, Chaos", func() {
+	var _ = Describe("ratelimiter.NewRing, Chaos", func() {
 		It("10 limiters work for one id", func() {
 			Skip("Can't run in travis")
 
@@ -236,7 +236,7 @@ var _ = Describe("RatelimiterGo", func() {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewRing(&redisOptions)
-				limiter, err := ratelimiter.RingNew(client, limiterOptions)
+				limiter, err := ratelimiter.NewRing(client, limiterOptions)
 				Expect(err).ToNot(HaveOccurred())
 				go worker(client, limiter)
 			}
@@ -251,7 +251,7 @@ var _ = Describe("RatelimiterGo", func() {
 		})
 	})
 
-	var _ = Describe("ratelimiter.ClusterNew, Chaos", func() {
+	var _ = Describe("ratelimiter.NewCluster, Chaos", func() {
 		It("10 limiters work for one id", func() {
 			Skip("Can't run in travis")
 
@@ -282,7 +282,7 @@ var _ = Describe("RatelimiterGo", func() {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewClusterClient(&redisOptions)
-				limiter, err := ratelimiter.ClusterNew(client, limiterOptions)
+				limiter, err := ratelimiter.NewCluster(client, limiterOptions)
 				Expect(err).ToNot(HaveOccurred())
 				go worker(client, limiter)
 			}

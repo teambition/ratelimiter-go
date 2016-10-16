@@ -19,7 +19,7 @@ or
 go get github.com/teambition/ratelimiter-go
 ```
 
-## Try HTTP Server Demo
+## HTTP Server Demo
 
 Try in `github.com/teambition/ratelimiter-go` directory:
 ```sh

@@ -6,14 +6,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	redis "gopkg.in/redis.v5"
 )
 
 // Limiter struct.
 type Limiter struct {
 	sha1, prefix, max, duration string
-	redis                       redisClient
+	redis                       limiterClient
 }
 
 // Options for Limiter
@@ -30,70 +28,92 @@ type Result struct {
 	Reset            time.Time
 }
 
+type redisResult interface {
+	Result() (interface{}, error)
+}
+
+type baseRedisClient interface {
+	Del(...string) redisResult
+	ScriptLoad(string) redisResult
+	EvalSha(string, []string, ...interface{}) redisResult
+}
+
 type redisClient interface {
-	Del(keys ...string) *redis.IntCmd
-	EvalSha(sha1 string, keys []string, args ...interface{}) *redis.Cmd
+	baseRedisClient
+}
+
+type clusterRedisClient interface {
+	baseRedisClient
+	ForEachMaster(func(baseRedisClient) error) error
+}
+
+type ringRedisClient interface {
+	baseRedisClient
+	ForEachShard(func(baseRedisClient) error) error
+}
+
+type limiterClient interface {
+	baseRedisClient
 	loadLua() (string, error)
 }
 
 type client struct {
-	*redis.Client
+	redisClient
 }
 
 func (c *client) loadLua() (string, error) {
-	return c.ScriptLoad(lua).Result()
+	res, err := c.ScriptLoad(lua).Result()
+	return res.(string), err
 }
 
 // New create a limiter with a redis client and options
-func New(c *redis.Client, opts Options) (*Limiter, error) {
+func New(c redisClient, opts Options) (*Limiter, error) {
 	return newLimiter(&client{c}, opts)
 }
 
 type clusterClient struct {
-	*redis.ClusterClient
+	clusterRedisClient
 }
 
 func (c *clusterClient) loadLua() (string, error) {
-	// ForEachMaster(fn func(client *Client) error) error
 	var sha1 string
-	err := c.ForEachMaster(func(client *redis.Client) error {
+	err := c.ForEachMaster(func(client baseRedisClient) error {
 		res, err := client.ScriptLoad(lua).Result()
 		if err == nil {
-			sha1 = res
+			sha1 = res.(string)
 		}
 		return err
 	})
 	return sha1, err
 }
 
-// ClusterNew create a limiter with a redis cluster client and options
-func ClusterNew(c *redis.ClusterClient, opts Options) (*Limiter, error) {
+// NewCluster create a limiter with a redis cluster client and options
+func NewCluster(c clusterRedisClient, opts Options) (*Limiter, error) {
 	return newLimiter(&clusterClient{c}, opts)
 }
 
 type ringClient struct {
-	*redis.Ring
+	ringRedisClient
 }
 
 func (c *ringClient) loadLua() (string, error) {
-	// ForEachMaster(fn func(client *Client) error) error
 	var sha1 string
-	err := c.ForEachShard(func(client *redis.Client) error {
+	err := c.ForEachShard(func(client baseRedisClient) error {
 		res, err := client.ScriptLoad(lua).Result()
 		if err == nil {
-			sha1 = res
+			sha1 = res.(string)
 		}
 		return err
 	})
 	return sha1, err
 }
 
-// RingNew create a limiter with a redis ring client and options
-func RingNew(c *redis.Ring, opts Options) (*Limiter, error) {
+// NewRing create a limiter with a redis ring client and options
+func NewRing(c ringRedisClient, opts Options) (*Limiter, error) {
 	return newLimiter(&ringClient{c}, opts)
 }
 
-func newLimiter(c redisClient, opts Options) (*Limiter, error) {
+func newLimiter(c limiterClient, opts Options) (*Limiter, error) {
 	var limiter *Limiter
 
 	sha1, err := c.loadLua()
