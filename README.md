@@ -4,9 +4,32 @@ The fastest abstract rate limiter, base on go-redis/redis.
 
 [![Build Status][travis-image]][travis-url]
 
+Summary
+-------
+- [Requirements](#requirements)
+- [Features](#features)
+- [Installation](#installation)
+- [HTTP Server Demo](#http-server-demo)
+- [API](#api)
+	- [type Limiter](#type-limiter)
+		- [func New](#func-new)
+		- [func (*Limiter) Get](#func-limiter-get)
+		- [func (*Limiter) Remove](#func-limiter-remove)
+	- [type Options](#type-options)
+	- [type RedisClient](#type-redisclient)
+	- [type Result](#type-result)
+- [License MIT](#license)
+
 ## Requirements
 
-- Redis 2.8+
+- Redis 3+
+
+## Features
+
+- Distributed
+- Atomicity
+- High-performance
+- Support redis cluster
 
 ## Installation
 
@@ -106,7 +129,7 @@ func main() {
 }
 ```
 
-## Package ratelimiter
+## API
 Package ratelimiter provides the fastest abstract rate limiter, base on go-redis/redis.
 ```go
   import "github.com/teambition/ratelimiter-go"
@@ -138,7 +161,7 @@ client := redis.NewClusterClient(redis.ClusterOptions{Addrs: []string{
 }})
 
 limiter, err := ratelimiter.New(&clusterClient{client}, limiterOptions)
-```go
+```
 
 #### func (*Limiter) Get
 Get get a limiter result for id. support custom limiter policy.
@@ -191,7 +214,7 @@ type RedisClient interface {
 }
 ```
 
-Implements RedisClient for a simple redis client:
+Implements `RedisClient` for a simple redis client:
 ```go
 import "gopkg.in/redis.v4"
 
@@ -210,7 +233,7 @@ func (c *redisClient) RateScriptLoad(script string) (string, error) {
 }
 ```
 
-Implements RedisClient for a cluster redis client:
+Implements `RedisClient` for a cluster redis client:
 ```go
 import "gopkg.in/redis.v4"
 
@@ -258,6 +281,9 @@ type Result struct {
 
 ## Node.js version: [thunk-ratelimiter](https://github.com/thunks/thunk-ratelimiter)
 
+## License
+`ratelimiter-go` is licensed under the [MIT](https://github.com/teambition/ratelimiter-go/blob/master/LICENSE) license.
+Copyright &copy; 2016 [Teambition](https://www.teambition.com).
 
 [travis-url]: https://travis-ci.org/teambition/ratelimiter-go
 [travis-image]: http://img.shields.io/travis/teambition/ratelimiter-go.svg
