@@ -15,6 +15,68 @@ import (
 	"gopkg.in/redis.v5"
 )
 
+// Implements RedisClient for redis.Client
+type redisClient struct {
+	*redis.Client
+}
+
+func (c *redisClient) RateDel(key string) error {
+	return c.Del(key).Err()
+}
+func (c *redisClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
+	return c.EvalSha(sha1, keys, args...).Result()
+}
+func (c *redisClient) RateScriptLoad(script string) (string, error) {
+	return c.ScriptLoad(script).Result()
+}
+
+// Implements RedisClient for redis.ClusterClient
+type clusterClient struct {
+	*redis.ClusterClient
+}
+
+func (c *clusterClient) RateDel(key string) error {
+	return c.Del(key).Err()
+}
+func (c *clusterClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
+	return c.EvalSha(sha1, keys, args...).Result()
+}
+func (c *clusterClient) RateScriptLoad(script string) (string, error) {
+	var sha1 string
+	err := c.ForEachMaster(func(client *redis.Client) error {
+		res, err := client.ScriptLoad(script).Result()
+		if err == nil {
+			sha1 = res
+		}
+		return err
+	})
+	return sha1, err
+}
+
+// Implements RedisClient for redis.Ring
+type ringClient struct {
+	*redis.Ring
+}
+
+func (c *ringClient) RateDel(key string) error {
+	return c.Del(key).Err()
+}
+func (c *ringClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
+	return c.EvalSha(sha1, keys, args...).Result()
+}
+func (c *ringClient) RateScriptLoad(script string) (string, error) {
+	var sha1 string
+	err := c.ForEachShard(func(client *redis.Client) error {
+		res, err := client.ScriptLoad(script).Result()
+		if err == nil {
+			sha1 = res
+		}
+		return err
+	})
+	return sha1, err
+}
+
+// init Test
 func TestRatelimiterGo(t *testing.T) {
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "RatelimiterGo Suite")
@@ -44,7 +106,7 @@ var _ = Describe("RatelimiterGo", func() {
 		var id string = genID()
 
 		It("ratelimiter.New", func() {
-			res, err := ratelimiter.New(client, ratelimiter.Options{})
+			res, err := ratelimiter.New(&redisClient{client}, ratelimiter.Options{})
 			Expect(err).ToNot(HaveOccurred())
 			limiter = res
 		})
@@ -64,13 +126,11 @@ var _ = Describe("RatelimiterGo", func() {
 		})
 
 		It("limiter.Remove", func() {
-			res, err := limiter.Remove(id)
+			err := limiter.Remove(id)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(res).To(Equal(1))
 
-			res2, err2 := limiter.Remove(id)
+			err2 := limiter.Remove(id)
 			Expect(err2).ToNot(HaveOccurred())
-			Expect(res2).To(Equal(0))
 
 			res3, err3 := limiter.Get(id)
 			Expect(err3).ToNot(HaveOccurred())
@@ -95,7 +155,7 @@ var _ = Describe("RatelimiterGo", func() {
 		var id string = genID()
 
 		It("ratelimiter.New", func() {
-			res, err := ratelimiter.New(client, ratelimiter.Options{
+			res, err := ratelimiter.New(&redisClient{client}, ratelimiter.Options{
 				Max:      3,
 				Duration: time.Second,
 			})
@@ -117,13 +177,14 @@ var _ = Describe("RatelimiterGo", func() {
 			res3, _ := limiter.Get(id)
 			Expect(res3.Remaining).To(Equal(0))
 			res4, _ := limiter.Get(id)
-			Expect(res4.Remaining).To(Equal(0))
+			Expect(res4.Remaining).To(Equal(-1))
+			res5, _ := limiter.Get(id)
+			Expect(res5.Remaining).To(Equal(-1))
 		})
 
 		It("limiter.Remove", func() {
-			res, err := limiter.Remove(id)
+			err := limiter.Remove(id)
 			Expect(err).ToNot(HaveOccurred())
-			Expect(res).To(Equal(1))
 
 			res2, err2 := limiter.Get(id)
 			Expect(err2).ToNot(HaveOccurred())
@@ -144,31 +205,43 @@ var _ = Describe("RatelimiterGo", func() {
 			Expect(err2).ToNot(HaveOccurred())
 			Expect(res2.Remaining).To(Equal(0))
 
-			time.Sleep(res2.Duration + time.Millisecond)
 			res3, err3 := limiter.Get(id, policy...)
 			Expect(err3).ToNot(HaveOccurred())
-			Expect(res3.Total).To(Equal(2))
-			Expect(res3.Remaining).To(Equal(1))
-			Expect(res3.Duration).To(Equal(time.Second))
+			Expect(res3.Remaining).To(Equal(-1))
 
+			time.Sleep(res3.Duration + time.Millisecond)
 			res4, err4 := limiter.Get(id, policy...)
 			Expect(err4).ToNot(HaveOccurred())
-			Expect(res4.Remaining).To(Equal(0))
+			Expect(res4.Total).To(Equal(2))
+			Expect(res4.Remaining).To(Equal(1))
+			Expect(res4.Duration).To(Equal(time.Second))
 
-			time.Sleep(res4.Duration + time.Millisecond)
 			res5, err5 := limiter.Get(id, policy...)
 			Expect(err5).ToNot(HaveOccurred())
-			Expect(res5.Total).To(Equal(1))
 			Expect(res5.Remaining).To(Equal(0))
-			Expect(res5.Duration).To(Equal(time.Second))
 
-			// restore after double Duration
-			time.Sleep(res4.Duration*2 + time.Millisecond)
 			res6, err6 := limiter.Get(id, policy...)
 			Expect(err6).ToNot(HaveOccurred())
-			Expect(res6.Total).To(Equal(2))
-			Expect(res6.Remaining).To(Equal(1))
-			Expect(res6.Duration).To(Equal(time.Millisecond * 500))
+			Expect(res6.Remaining).To(Equal(-1))
+
+			time.Sleep(res6.Duration + time.Millisecond)
+			res7, err7 := limiter.Get(id, policy...)
+			Expect(err7).ToNot(HaveOccurred())
+			Expect(res7.Total).To(Equal(1))
+			Expect(res7.Remaining).To(Equal(0))
+			Expect(res7.Duration).To(Equal(time.Second))
+
+			res8, err8 := limiter.Get(id, policy...)
+			Expect(err8).ToNot(HaveOccurred())
+			Expect(res8.Remaining).To(Equal(-1))
+
+			// restore after double Duration
+			time.Sleep(res8.Duration*2 + time.Millisecond)
+			res9, err9 := limiter.Get(id, policy...)
+			Expect(err9).ToNot(HaveOccurred())
+			Expect(res9.Total).To(Equal(2))
+			Expect(res9.Remaining).To(Equal(1))
+			Expect(res9.Duration).To(Equal(time.Millisecond * 500))
 		})
 	})
 
@@ -179,7 +252,7 @@ var _ = Describe("RatelimiterGo", func() {
 			var result = NewResult(make([]int, 10000))
 
 			var redisOptions = redis.Options{Addr: "localhost:6379"}
-			var limiterOptions = ratelimiter.Options{Max: 9999}
+			var limiterOptions = ratelimiter.Options{Max: 9998}
 			var worker = func(c *redis.Client, l *ratelimiter.Limiter) {
 				defer wg.Done()
 				defer c.Close()
@@ -194,22 +267,22 @@ var _ = Describe("RatelimiterGo", func() {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewClient(&redisOptions)
-				limiter, err := ratelimiter.New(client, limiterOptions)
+				limiter, err := ratelimiter.New(&redisClient{client}, limiterOptions)
 				Expect(err).ToNot(HaveOccurred())
 				go worker(client, limiter)
 			}
 
 			wg.Wait()
 			s := result.Value()
-			sort.Ints(s) // [0 0 1 2 3 ... 9997 9998]
-			Expect(s[0]).To(Equal(0))
+			sort.Ints(s) // [-1 -1 0 1 2 3 ... 9997 9997]
+			Expect(s[0]).To(Equal(-1))
 			for i := 1; i < 10000; i++ {
-				Expect(s[i]).To(Equal(i - 1))
+				Expect(s[i]).To(Equal(i - 2))
 			}
 		})
 	})
 
-	var _ = Describe("ratelimiter.NewRing, Chaos", func() {
+	var _ = Describe("ratelimiter.New with redis ring, Chaos", func() {
 		It("10 limiters work for one id", func() {
 			Skip("Can't run in travis")
 
@@ -221,7 +294,7 @@ var _ = Describe("RatelimiterGo", func() {
 				"a": "localhost:6379",
 				"b": "localhost:6380",
 			}}
-			var limiterOptions = ratelimiter.Options{Max: 9999}
+			var limiterOptions = ratelimiter.Options{Max: 9998}
 			var worker = func(c *redis.Ring, l *ratelimiter.Limiter) {
 				defer wg.Done()
 				defer c.Close()
@@ -236,22 +309,22 @@ var _ = Describe("RatelimiterGo", func() {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewRing(&redisOptions)
-				limiter, err := ratelimiter.NewRing(client, limiterOptions)
+				limiter, err := ratelimiter.New(&ringClient{client}, limiterOptions)
 				Expect(err).ToNot(HaveOccurred())
 				go worker(client, limiter)
 			}
 
 			wg.Wait()
 			s := result.Value()
-			sort.Ints(s) // [0 0 1 2 3 ... 9997 9998]
-			Expect(s[0]).To(Equal(0))
+			sort.Ints(s) // [-1 -1 0 1 2 3 ... 9997 9997]
+			Expect(s[0]).To(Equal(-1))
 			for i := 1; i < 10000; i++ {
-				Expect(s[i]).To(Equal(i - 1))
+				Expect(s[i]).To(Equal(i - 2))
 			}
 		})
 	})
 
-	var _ = Describe("ratelimiter.NewCluster, Chaos", func() {
+	var _ = Describe("ratelimiter.New with redis cluster, Chaos", func() {
 		It("10 limiters work for one id", func() {
 			Skip("Can't run in travis")
 
@@ -267,7 +340,7 @@ var _ = Describe("RatelimiterGo", func() {
 				"localhost:7004",
 				"localhost:7005",
 			}}
-			var limiterOptions = ratelimiter.Options{Max: 9999}
+			var limiterOptions = ratelimiter.Options{Max: 9998}
 			var worker = func(c *redis.ClusterClient, l *ratelimiter.Limiter) {
 				defer wg.Done()
 				defer c.Close()
@@ -282,17 +355,17 @@ var _ = Describe("RatelimiterGo", func() {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewClusterClient(&redisOptions)
-				limiter, err := ratelimiter.NewCluster(client, limiterOptions)
+				limiter, err := ratelimiter.New(&clusterClient{client}, limiterOptions)
 				Expect(err).ToNot(HaveOccurred())
 				go worker(client, limiter)
 			}
 
 			wg.Wait()
 			s := result.Value()
-			sort.Ints(s) // [0 0 1 2 3 ... 9997 9998]
-			Expect(s[0]).To(Equal(0))
+			sort.Ints(s) // [-1 -1 0 1 2 3 ... 9997 9997]
+			Expect(s[0]).To(Equal(-1))
 			for i := 1; i < 10000; i++ {
-				Expect(s[i]).To(Equal(i - 1))
+				Expect(s[i]).To(Equal(i - 2))
 			}
 		})
 	})
