@@ -25,11 +25,6 @@ if limit[1] then
     res[1] = -1
   end
 
-  if policyCount > 1 and res[1] == -1 then
-    redis.call('incr', statusKey)
-    redis.call('pexpire', statusKey, res[3] * 2)
-  end
-
 else
 
   local index = 1
@@ -50,8 +45,11 @@ else
   redis.call('pexpire', KEYS[1], res[3])
 
   if policyCount > 1 then
-    redis.call('set', statusKey, index)
+    redis.call('incr', statusKey)
     redis.call('pexpire', statusKey, res[3] * 2)
+    if index==1 then
+      redis.call('incr', statusKey)
+    end
   end
 
 end
