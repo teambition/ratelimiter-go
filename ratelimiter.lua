@@ -31,7 +31,7 @@ else
   if policyCount > 1 then
     index = tonumber(redis.call('get', statusKey)) or 1
     if index > policyCount then
-      index = 1
+      index = policyCount
     end
   end
 
@@ -47,7 +47,7 @@ else
   if policyCount > 1 then
     redis.call('incr', statusKey)
     redis.call('pexpire', statusKey, res[3] * 2)
-    if index==1 then
+    if index == 1 then
       redis.call('incr', statusKey)
     end
   end

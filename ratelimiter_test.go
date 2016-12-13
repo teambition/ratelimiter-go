@@ -324,10 +324,13 @@ var _ = Describe("RatelimiterGo", func() {
 			Expect(res.Total).To(Equal(1))
 			Expect(res.Remaining).To(Equal(-1))
 
-			//The Fourth policy is expired, then to First policy again.
-			time.Sleep(res.Duration + time.Millisecond)
 			res, err = limiter.Get(id, policy...)
-			time.Sleep(res.Duration + time.Millisecond)
+			Expect(res.Total).To(Equal(1))
+			Expect(res.Remaining).To(Equal(-1))
+
+			// restore to First policy after Fourth policy*2 Duration
+			time.Sleep(res.Duration*2 + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
 			Expect(res.Total).To(Equal(2))
 			Expect(res.Remaining).To(Equal(1))
 			Expect(res.Duration).To(Equal(time.Millisecond * 500))

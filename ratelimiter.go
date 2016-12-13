@@ -250,7 +250,7 @@ else
   if policyCount > 1 then
     index = tonumber(redis.call('get', statusKey)) or 1
     if index > policyCount then
-      index = 1
+      index = policyCount
     end
   end
 
