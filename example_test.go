@@ -13,7 +13,8 @@ func ExampleRatelimiterGo() {
 		Addr: "localhost:6379",
 	})
 
-	limiter, err := ratelimiter.New(&redisClient{client}, ratelimiter.Options{
+	limiter, err := ratelimiter.New(ratelimiter.Options{
+		Client:   &redisClient{client},
 		Max:      10,
 		Duration: time.Second, // limit to 1000 requests in 1 minute.
 	})
