@@ -243,6 +243,95 @@ var _ = Describe("RatelimiterGo", func() {
 			Expect(res9.Remaining).To(Equal(1))
 			Expect(res9.Duration).To(Equal(time.Millisecond * 500))
 		})
+		It("limiter.Get with multi-policy for expired", func() {
+			id := genID()
+			policy := []int{2, 500, 2, 1000, 1, 1000, 1, 1200}
+
+			//First policy
+			res, err := limiter.Get(id, policy...)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(res.Total).To(Equal(2))
+			Expect(res.Remaining).To(Equal(1))
+			Expect(res.Duration).To(Equal(time.Millisecond * 500))
+
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Remaining).To(Equal(0))
+
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Remaining).To(Equal(-1))
+
+			//Second policy
+			time.Sleep(res.Duration + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Total).To(Equal(2))
+			Expect(res.Remaining).To(Equal(1))
+
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Remaining).To(Equal(0))
+
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Remaining).To(Equal(-1))
+			Expect(res.Duration).To(Equal(time.Millisecond * 1000))
+
+			//Third policy
+			time.Sleep(res.Duration + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Total).To(Equal(1))
+			Expect(res.Remaining).To(Equal(0))
+			Expect(res.Duration).To(Equal(time.Second))
+
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Remaining).To(Equal(-1))
+
+			// restore to First policy after Third policy*2 Duration
+			time.Sleep(res.Duration*2 + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Total).To(Equal(2))
+			Expect(res.Remaining).To(Equal(1))
+			Expect(res.Duration).To(Equal(time.Millisecond * 500))
+
+			//Second policy
+			time.Sleep(res.Duration + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Total).To(Equal(2))
+			Expect(res.Remaining).To(Equal(1))
+
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Remaining).To(Equal(0))
+
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Remaining).To(Equal(-1))
+			Expect(res.Duration).To(Equal(time.Millisecond * 1000))
+
+			//Third policy
+			time.Sleep(res.Duration + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Total).To(Equal(1))
+			Expect(res.Remaining).To(Equal(0))
+			Expect(res.Duration).To(Equal(time.Second))
+
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Remaining).To(Equal(-1))
+
+			//Fourth policy
+			time.Sleep(res.Duration + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Total).To(Equal(1))
+			Expect(res.Remaining).To(Equal(0))
+			Expect(res.Duration).To(Equal(time.Millisecond * 1200))
+
+			res, err = limiter.Get(id, policy...)
+			Expect(res.Total).To(Equal(1))
+			Expect(res.Remaining).To(Equal(-1))
+
+			//The Fourth policy is expired, then to First policy again.
+			time.Sleep(res.Duration + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			time.Sleep(res.Duration + time.Millisecond)
+			Expect(res.Total).To(Equal(2))
+			Expect(res.Remaining).To(Equal(1))
+			Expect(res.Duration).To(Equal(time.Millisecond * 500))
+		})
 	})
 
 	var _ = Describe("ratelimiter.New, Chaos", func() {
