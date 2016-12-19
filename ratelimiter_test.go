@@ -4,13 +4,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"os"
 	"sort"
 	"sync"
 	"testing"
 	"time"
 
-	. "github.com/onsi/ginkgo"
-	. "github.com/onsi/gomega"
+	"github.com/stretchr/testify/assert"
 	"github.com/teambition/ratelimiter-go"
 	"gopkg.in/redis.v5"
 )
@@ -76,282 +76,281 @@ func (c *ringClient) RateScriptLoad(script string) (string, error) {
 	return sha1, err
 }
 
-// init Test
-func TestRatelimiterGo(t *testing.T) {
-	RegisterFailHandler(Fail)
-	RunSpecs(t, "RatelimiterGo Suite")
-}
-
-var client *redis.Client
+var client = redis.NewClient(&redis.Options{
+	Addr: "localhost:6379",
+})
 var limiter *ratelimiter.Limiter
 
-var _ = BeforeSuite(func() {
-	client = redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
+func TestMain(m *testing.M) {
+
+	code := m.Run()
+	client.Close()
+	os.Exit(code)
+}
+
+func TestRedis(t *testing.T) {
+	assert := assert.New(t)
 
 	pong, err := client.Ping().Result()
-	Expect(pong).To(Equal("PONG"))
-	Expect(err).ToNot(HaveOccurred())
-})
+	assert.Nil(err)
+	assert.Equal("PONG", pong)
+}
+func TestRatelimiterGo(t *testing.T) {
+	assert := assert.New(t)
+	t.Run("ratelimiter.New, With default options", func(t *testing.T) {
 
-var _ = AfterSuite(func() {
-	err := client.Close()
-	Expect(err).ShouldNot(HaveOccurred())
-})
-
-var _ = Describe("RatelimiterGo", func() {
-	var _ = Describe("ratelimiter.New, With default options", func() {
-		var limiter *ratelimiter.Limiter
-		var id string = genID()
-
-		It("ratelimiter.New", func() {
-			res, err := ratelimiter.New(&redisClient{client}, ratelimiter.Options{})
-			Expect(err).ToNot(HaveOccurred())
+		var limiter ratelimiter.AbstractLimiter
+		var id = genID()
+		t.Run("ratelimiter.New", func(t *testing.T) {
+			res, err := ratelimiter.New(ratelimiter.Options{Client: &redisClient{client}})
+			assert.Nil(err)
 			limiter = res
 		})
 
-		It("limiter.Get", func() {
+		t.Run("limiter.Get", func(t *testing.T) {
 			res, err := limiter.Get(id)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(res.Total).To(Equal(100))
-			Expect(res.Remaining).To(Equal(99))
-			Expect(res.Duration).To(Equal(time.Duration(60 * 1e9)))
-			Expect(res.Reset.UnixNano() > time.Now().UnixNano()).To(Equal(true))
+			assert.Nil(err)
+			assert.Equal(res.Total, 100)
+			assert.Equal(res.Remaining, 99)
+			assert.Equal(res.Duration, time.Duration(60*1e9))
+			assert.True(res.Reset.UnixNano() > time.Now().UnixNano())
 
-			res2, err2 := limiter.Get(id)
-			Expect(err2).ToNot(HaveOccurred())
-			Expect(res2.Total).To(Equal(100))
-			Expect(res2.Remaining).To(Equal(98))
+			res, err = limiter.Get(id)
+			assert.Nil(err)
+			assert.Equal(res.Total, 100)
+			assert.Equal(res.Remaining, 98)
 		})
-
-		It("limiter.Remove", func() {
+		t.Run("limiter.Remove", func(t *testing.T) {
 			err := limiter.Remove(id)
-			Expect(err).ToNot(HaveOccurred())
+			assert.Nil(err)
 
-			err2 := limiter.Remove(id)
-			Expect(err2).ToNot(HaveOccurred())
+			err = limiter.Remove(id)
+			assert.Nil(err)
 
-			res3, err3 := limiter.Get(id)
-			Expect(err3).ToNot(HaveOccurred())
-			Expect(res3.Total).To(Equal(100))
-			Expect(res3.Remaining).To(Equal(99))
+			res, err := limiter.Get(id)
+			assert.Nil(err)
+			assert.Equal(res.Total, 100)
+			assert.Equal(res.Remaining, 99)
 		})
-
-		It("limiter.Get with invalid args", func() {
+		t.Run("limiter.Get with invalid args", func(t *testing.T) {
 			_, err := limiter.Get(id, 10)
-			Expect(err.Error()).To(Equal("ratelimiter: must be paired values"))
+			assert.Equal("ratelimiter: must be paired values", err.Error())
 
 			_, err2 := limiter.Get(id, -1, 10)
-			Expect(err2.Error()).To(Equal("ratelimiter: must be positive integer"))
+			assert.Equal("ratelimiter: must be positive integer", err2.Error())
 
 			_, err3 := limiter.Get(id, 10, 0)
-			Expect(err3.Error()).To(Equal("ratelimiter: must be positive integer"))
+
+			assert.Equal("ratelimiter: must be positive integer", err3.Error())
 		})
 	})
-
-	var _ = Describe("ratelimiter.New, With options", func() {
-		var limiter *ratelimiter.Limiter
-		var id string = genID()
-
-		It("ratelimiter.New", func() {
-			res, err := ratelimiter.New(&redisClient{client}, ratelimiter.Options{
+	t.Run("ratelimiter.New, With options", func(t *testing.T) {
+		var limiter ratelimiter.AbstractLimiter
+		var id = genID()
+		t.Run("ratelimiter.New", func(t *testing.T) {
+			res, err := ratelimiter.New(ratelimiter.Options{
+				Client:   &redisClient{client},
 				Max:      3,
 				Duration: time.Second,
 			})
-			Expect(err).ToNot(HaveOccurred())
+			assert.Nil(err)
 			limiter = res
 		})
 
-		It("limiter.Get", func() {
+		t.Run("limiter.Get", func(t *testing.T) {
 			res, err := limiter.Get(id)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(res.Total).To(Equal(3))
-			Expect(res.Remaining).To(Equal(2))
-			Expect(res.Duration).To(Equal(time.Second))
-			Expect(res.Reset.UnixNano() > time.Now().UnixNano()).To(Equal(true))
-			Expect(res.Reset.UnixNano() <= time.Now().Add(time.Second).UnixNano()).To(Equal(true))
+			assert.Nil(err)
+			assert.Equal(3, res.Total)
+			assert.Equal(2, res.Remaining)
+			assert.Equal(time.Second, res.Duration)
+			assert.True(res.Reset.UnixNano() > time.Now().UnixNano())
+			assert.True(res.Reset.UnixNano() <= time.Now().Add(time.Second).UnixNano())
 
-			res2, _ := limiter.Get(id)
-			Expect(res2.Remaining).To(Equal(1))
-			res3, _ := limiter.Get(id)
-			Expect(res3.Remaining).To(Equal(0))
-			res4, _ := limiter.Get(id)
-			Expect(res4.Remaining).To(Equal(-1))
-			res5, _ := limiter.Get(id)
-			Expect(res5.Remaining).To(Equal(-1))
+			res, err = limiter.Get(id)
+			assert.Equal(res.Remaining, 1)
+			res, err = limiter.Get(id)
+			assert.Equal(res.Remaining, 0)
+			res, err = limiter.Get(id)
+			assert.Equal(res.Remaining, -1)
+			res, err = limiter.Get(id)
+			assert.Equal(res.Remaining, -1)
 		})
 
-		It("limiter.Remove", func() {
+		t.Run("limiter.Remove", func(t *testing.T) {
 			err := limiter.Remove(id)
-			Expect(err).ToNot(HaveOccurred())
+			assert.Nil(err)
 
 			res2, err2 := limiter.Get(id)
-			Expect(err2).ToNot(HaveOccurred())
-			Expect(res2.Remaining).To(Equal(2))
+			assert.Nil(err2)
+			assert.Equal(res2.Remaining, 2)
 		})
 
-		It("limiter.Get with multi-policy", func() {
+		t.Run("limiter.Get with multi-policy", func(t *testing.T) {
 			id := genID()
-			policy := []int{2, 500, 2, 1000, 1, 1000}
+			policy := []int{2, 100, 2, 200, 1, 300}
 
 			res, err := limiter.Get(id, policy...)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(res.Total).To(Equal(2))
-			Expect(res.Remaining).To(Equal(1))
-			Expect(res.Duration).To(Equal(time.Millisecond * 500))
+			assert.Nil(err)
+			assert.Equal(2, res.Total)
+			assert.Equal(1, res.Remaining)
+			assert.Equal(time.Millisecond*100, res.Duration)
 
-			res2, err2 := limiter.Get(id, policy...)
-			Expect(err2).ToNot(HaveOccurred())
-			Expect(res2.Remaining).To(Equal(0))
+			res, err = limiter.Get(id, policy...)
+			assert.Nil(err)
+			assert.Equal(0, res.Remaining)
 
-			res3, err3 := limiter.Get(id, policy...)
-			Expect(err3).ToNot(HaveOccurred())
-			Expect(res3.Remaining).To(Equal(-1))
+			res, err = limiter.Get(id, policy...)
+			assert.Nil(err)
+			assert.Equal(-1, res.Remaining)
 
-			time.Sleep(res3.Duration + time.Millisecond)
-			res4, err4 := limiter.Get(id, policy...)
-			Expect(err4).ToNot(HaveOccurred())
-			Expect(res4.Total).To(Equal(2))
-			Expect(res4.Remaining).To(Equal(1))
-			Expect(res4.Duration).To(Equal(time.Second))
+			time.Sleep(res.Duration + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			assert.Nil(err)
+			assert.Equal(2, res.Total)
+			assert.Equal(1, res.Remaining)
+			assert.Equal(time.Millisecond*200, res.Duration)
 
-			res5, err5 := limiter.Get(id, policy...)
-			Expect(err5).ToNot(HaveOccurred())
-			Expect(res5.Remaining).To(Equal(0))
+			res, err = limiter.Get(id, policy...)
+			assert.Nil(err)
+			assert.Equal(0, res.Remaining)
 
-			res6, err6 := limiter.Get(id, policy...)
-			Expect(err6).ToNot(HaveOccurred())
-			Expect(res6.Remaining).To(Equal(-1))
+			res, err = limiter.Get(id, policy...)
+			assert.Nil(err)
+			assert.Equal(-1, res.Remaining)
 
-			time.Sleep(res6.Duration + time.Millisecond)
-			res7, err7 := limiter.Get(id, policy...)
-			Expect(err7).ToNot(HaveOccurred())
-			Expect(res7.Total).To(Equal(1))
-			Expect(res7.Remaining).To(Equal(0))
-			Expect(res7.Duration).To(Equal(time.Second))
+			time.Sleep(res.Duration + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			assert.Nil(err)
+			assert.Equal(1, res.Total)
+			assert.Equal(0, res.Remaining)
+			assert.Equal(time.Millisecond*300, res.Duration)
 
-			res8, err8 := limiter.Get(id, policy...)
-			Expect(err8).ToNot(HaveOccurred())
-			Expect(res8.Remaining).To(Equal(-1))
+			res, err = limiter.Get(id, policy...)
+			assert.Nil(err)
+			assert.Equal(res.Remaining, -1)
 
 			// restore after double Duration
-			time.Sleep(res8.Duration*2 + time.Millisecond)
-			res9, err9 := limiter.Get(id, policy...)
-			Expect(err9).ToNot(HaveOccurred())
-			Expect(res9.Total).To(Equal(2))
-			Expect(res9.Remaining).To(Equal(1))
-			Expect(res9.Duration).To(Equal(time.Millisecond * 500))
+			time.Sleep(res.Duration*2 + time.Millisecond)
+			res, err = limiter.Get(id, policy...)
+			assert.Nil(err)
+			assert.Equal(2, res.Total)
+			assert.Equal(1, res.Remaining)
+			assert.Equal(time.Millisecond*100, res.Duration)
+
 		})
-		It("limiter.Get with multi-policy for expired", func() {
+		t.Run("limiter.Get with multi-policy for expired", func(t *testing.T) {
 			id := genID()
-			policy := []int{2, 500, 2, 1000, 1, 1000, 1, 1200}
+			policy := []int{2, 100, 2, 200, 1, 200, 1, 300}
 
 			//First policy
 			res, err := limiter.Get(id, policy...)
-			Expect(err).ToNot(HaveOccurred())
-			Expect(res.Total).To(Equal(2))
-			Expect(res.Remaining).To(Equal(1))
-			Expect(res.Duration).To(Equal(time.Millisecond * 500))
+			assert.Nil(err)
+			assert.Equal(2, res.Total)
+			assert.Equal(1, res.Remaining)
+			assert.Equal(time.Millisecond*100, res.Duration)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Remaining).To(Equal(0))
+			assert.Equal(0, res.Remaining)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Remaining).To(Equal(-1))
+			assert.Equal(-1, res.Remaining)
 
 			//Second policy
 			time.Sleep(res.Duration + time.Millisecond)
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Total).To(Equal(2))
-			Expect(res.Remaining).To(Equal(1))
+			assert.Equal(2, res.Total)
+			assert.Equal(1, res.Remaining)
+			assert.Equal(time.Millisecond*200, res.Duration)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Remaining).To(Equal(0))
+			assert.Equal(0, res.Remaining)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Remaining).To(Equal(-1))
-			Expect(res.Duration).To(Equal(time.Millisecond * 1000))
+			assert.Equal(-1, res.Remaining)
 
 			//Third policy
 			time.Sleep(res.Duration + time.Millisecond)
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Total).To(Equal(1))
-			Expect(res.Remaining).To(Equal(0))
-			Expect(res.Duration).To(Equal(time.Second))
+			assert.Equal(1, res.Total)
+			assert.Equal(0, res.Remaining)
+			assert.Equal(time.Millisecond*200, res.Duration)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Remaining).To(Equal(-1))
+			assert.Equal(-1, res.Remaining)
 
 			// restore to First policy after Third policy*2 Duration
 			time.Sleep(res.Duration*2 + time.Millisecond)
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Total).To(Equal(2))
-			Expect(res.Remaining).To(Equal(1))
-			Expect(res.Duration).To(Equal(time.Millisecond * 500))
+			assert.Nil(err)
+			assert.Equal(2, res.Total)
+			assert.Equal(1, res.Remaining)
+			assert.Equal(time.Millisecond*100, res.Duration)
 
 			//Second policy
 			time.Sleep(res.Duration + time.Millisecond)
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Total).To(Equal(2))
-			Expect(res.Remaining).To(Equal(1))
+			assert.Equal(2, res.Total)
+			assert.Equal(1, res.Remaining)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Remaining).To(Equal(0))
+			assert.Equal(0, res.Remaining)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Remaining).To(Equal(-1))
-			Expect(res.Duration).To(Equal(time.Millisecond * 1000))
+			assert.Equal(-1, res.Remaining)
+			assert.Equal(res.Duration, time.Millisecond*200)
 
 			//Third policy
 			time.Sleep(res.Duration + time.Millisecond)
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Total).To(Equal(1))
-			Expect(res.Remaining).To(Equal(0))
-			Expect(res.Duration).To(Equal(time.Second))
+			assert.Equal(1, res.Total)
+			assert.Equal(0, res.Remaining)
+			assert.Equal(time.Millisecond*200, res.Duration)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Remaining).To(Equal(-1))
+			assert.Equal(-1, res.Remaining)
 
 			//Fourth policy
 			time.Sleep(res.Duration + time.Millisecond)
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Total).To(Equal(1))
-			Expect(res.Remaining).To(Equal(0))
-			Expect(res.Duration).To(Equal(time.Millisecond * 1200))
+			assert.Equal(1, res.Total)
+			assert.Equal(0, res.Remaining)
+			assert.Equal(res.Duration, time.Millisecond*300)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Total).To(Equal(1))
-			Expect(res.Remaining).To(Equal(-1))
+			assert.Equal(1, res.Total)
+			assert.Equal(-1, res.Remaining)
 
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Total).To(Equal(1))
-			Expect(res.Remaining).To(Equal(-1))
+			assert.Equal(1, res.Total)
+			assert.Equal(-1, res.Remaining)
 
 			// restore to First policy after Fourth policy*2 Duration
 			time.Sleep(res.Duration*2 + time.Millisecond)
 			res, err = limiter.Get(id, policy...)
-			Expect(res.Total).To(Equal(2))
-			Expect(res.Remaining).To(Equal(1))
-			Expect(res.Duration).To(Equal(time.Millisecond * 500))
+			assert.Nil(err)
+			assert.Equal(2, res.Total)
+			assert.Equal(1, res.Remaining)
+			assert.Equal(time.Millisecond*100, res.Duration)
 		})
 	})
 
-	var _ = Describe("ratelimiter.New, Chaos", func() {
-		It("10 limiters work for one id", func() {
+	t.Run("ratelimiter.New, Chaos", func(t *testing.T) {
+
+		t.Run("10 limiters work for one id", func(t *testing.T) {
+
 			var wg sync.WaitGroup
-			var id string = genID()
+			var id = genID()
 			var result = NewResult(make([]int, 10000))
 
 			var redisOptions = redis.Options{Addr: "localhost:6379"}
-			var limiterOptions = ratelimiter.Options{Max: 9998}
-			var worker = func(c *redis.Client, l *ratelimiter.Limiter) {
+
+			var worker = func(c *redis.Client, l ratelimiter.AbstractLimiter) {
 				defer wg.Done()
 				defer c.Close()
 
 				for i := 0; i < 1000; i++ {
 					res, err := l.Get(id)
-					Expect(err).ToNot(HaveOccurred())
+					assert.Nil(err)
 					result.Push(res.Remaining)
 				}
 			}
@@ -359,41 +358,42 @@ var _ = Describe("RatelimiterGo", func() {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewClient(&redisOptions)
-				limiter, err := ratelimiter.New(&redisClient{client}, limiterOptions)
-				Expect(err).ToNot(HaveOccurred())
+
+				limiter, err := ratelimiter.New(ratelimiter.Options{Client: &redisClient{client}, Max: 9998})
+				assert.Nil(err)
 				go worker(client, limiter)
 			}
 
 			wg.Wait()
 			s := result.Value()
 			sort.Ints(s) // [-1 -1 0 1 2 3 ... 9997 9997]
-			Expect(s[0]).To(Equal(-1))
+			assert.Equal(s[0], -1)
 			for i := 1; i < 10000; i++ {
-				Expect(s[i]).To(Equal(i - 2))
+				assert.Equal(s[i], i-2)
 			}
 		})
 	})
 
-	var _ = Describe("ratelimiter.New with redis ring, Chaos", func() {
-		It("10 limiters work for one id", func() {
-			Skip("Can't run in travis")
+	t.Run("ratelimiter.New with redis ring, Chaos", func(t *testing.T) {
+		t.Run("10 limiters work for one id", func(t *testing.T) {
+			t.Skip("Can't run in travis")
 
 			var wg sync.WaitGroup
-			var id string = genID()
+			var id = genID()
 			var result = NewResult(make([]int, 10000))
 
 			var redisOptions = redis.RingOptions{Addrs: map[string]string{
 				"a": "localhost:6379",
 				"b": "localhost:6380",
 			}}
-			var limiterOptions = ratelimiter.Options{Max: 9998}
-			var worker = func(c *redis.Ring, l *ratelimiter.Limiter) {
+
+			var worker = func(c *redis.Ring, l ratelimiter.AbstractLimiter) {
 				defer wg.Done()
 				defer c.Close()
 
 				for i := 0; i < 1000; i++ {
 					res, err := l.Get(id)
-					Expect(err).ToNot(HaveOccurred())
+					assert.Nil(err)
 					result.Push(res.Remaining)
 				}
 			}
@@ -401,27 +401,27 @@ var _ = Describe("RatelimiterGo", func() {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewRing(&redisOptions)
-				limiter, err := ratelimiter.New(&ringClient{client}, limiterOptions)
-				Expect(err).ToNot(HaveOccurred())
+				limiter, err := ratelimiter.New(ratelimiter.Options{Client: &ringClient{client}, Max: 9998})
+				assert.Nil(err)
 				go worker(client, limiter)
 			}
 
 			wg.Wait()
 			s := result.Value()
 			sort.Ints(s) // [-1 -1 0 1 2 3 ... 9997 9997]
-			Expect(s[0]).To(Equal(-1))
+			assert.Equal(s[0], -1)
 			for i := 1; i < 10000; i++ {
-				Expect(s[i]).To(Equal(i - 2))
+				assert.Equal(s[i], i-2)
 			}
 		})
 	})
 
-	var _ = Describe("ratelimiter.New with redis cluster, Chaos", func() {
-		It("10 limiters work for one id", func() {
-			Skip("Can't run in travis")
+	t.Run("ratelimiter.New with redis cluster, Chaos", func(t *testing.T) {
+		t.Run("10 limiters work for one id", func(t *testing.T) {
+			t.Skip("Can't run in travis")
 
 			var wg sync.WaitGroup
-			var id string = genID()
+			var id = genID()
 			var result = NewResult(make([]int, 10000))
 
 			var redisOptions = redis.ClusterOptions{Addrs: []string{
@@ -432,14 +432,14 @@ var _ = Describe("RatelimiterGo", func() {
 				"localhost:7004",
 				"localhost:7005",
 			}}
-			var limiterOptions = ratelimiter.Options{Max: 9998}
-			var worker = func(c *redis.ClusterClient, l *ratelimiter.Limiter) {
+
+			var worker = func(c *redis.ClusterClient, l ratelimiter.AbstractLimiter) {
 				defer wg.Done()
 				defer c.Close()
 
 				for i := 0; i < 1000; i++ {
 					res, err := l.Get(id)
-					Expect(err).ToNot(HaveOccurred())
+					assert.Nil(err)
 					result.Push(res.Remaining)
 				}
 			}
@@ -447,21 +447,21 @@ var _ = Describe("RatelimiterGo", func() {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewClusterClient(&redisOptions)
-				limiter, err := ratelimiter.New(&clusterClient{client}, limiterOptions)
-				Expect(err).ToNot(HaveOccurred())
+				limiter, err := ratelimiter.New(ratelimiter.Options{Client: &clusterClient{client}, Max: 9998})
+				assert.Nil(err)
 				go worker(client, limiter)
 			}
 
 			wg.Wait()
 			s := result.Value()
 			sort.Ints(s) // [-1 -1 0 1 2 3 ... 9997 9997]
-			Expect(s[0]).To(Equal(-1))
+			assert.Equal(s[0], -1)
 			for i := 1; i < 10000; i++ {
-				Expect(s[i]).To(Equal(i - 2))
+				assert.Equal(s[i], i-2)
 			}
 		})
 	})
-})
+}
 
 func genID() string {
 	buf := make([]byte, 12)

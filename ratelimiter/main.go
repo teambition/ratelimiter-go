@@ -11,10 +11,10 @@ import (
 	"time"
 
 	ratelimiter "github.com/teambition/ratelimiter-go"
-	redis "gopkg.in/redis.v4"
+	redis "gopkg.in/redis.v5"
 )
 
-var limiter *ratelimiter.Limiter
+var limiter ratelimiter.AbstractLimiter
 
 // Implements RedisClient for redis.Client
 type redisClient struct {
@@ -32,15 +32,21 @@ func (c *redisClient) RateScriptLoad(script string) (string, error) {
 }
 
 func init() {
+	var err error
+	// redis storage
 	client := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-
-	var err error
-	limiter, err = ratelimiter.New(&redisClient{client}, ratelimiter.Options{
+	limiter, err = ratelimiter.New(ratelimiter.Options{
+		Client:   &redisClient{client},
 		Max:      10,
 		Duration: time.Minute, // limit to 1000 requests in 1 minute.
 	})
+	// memory storage
+	// limiter, err = ratelimiter.New(ratelimiter.Options{
+	// 	Max:      10,
+	// 	Duration: time.Minute, // limit to 1000 requests in 1 minute.
+	// })
 	if err != nil {
 		panic(err)
 	}

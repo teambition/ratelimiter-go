@@ -1,6 +1,6 @@
 ratelimiter-go
 ==========
-The fastest abstract rate limiter, base on go-redis/redis.
+The fastest abstract rate limiter, base on memory or redis storage.
 
 [![Build Status][travis-image]][travis-url]
 
@@ -11,7 +11,7 @@ Summary
 - [Installation](#installation)
 - [HTTP Server Demo](#http-server-demo)
 - [API](#api)
-	- [type Limiter](#type-limiter)
+	- [type AbstractLimiter](#type-abstractlimiter)
 		- [func New](#func-new)
 		- [func (*Limiter) Get](#func-limiter-get)
 		- [func (*Limiter) Remove](#func-limiter-remove)
@@ -22,7 +22,7 @@ Summary
 
 ## Requirements
 
-- Redis 3+
+- Redis 3+ (required if specify redis storage)
 
 ## Features
 
@@ -30,6 +30,7 @@ Summary
 - Atomicity
 - High-performance
 - Support redis cluster
+- Support memory storage
 
 ## Installation
 
@@ -44,7 +45,7 @@ go get github.com/teambition/ratelimiter-go
 
 ## HTTP Server Demo
 
-Try in `github.com/teambition/ratelimiter-go` directory:
+Try into `github.com/teambition/ratelimiter-go` directory:
 ```sh
 go run ratelimiter/main.go
 ```
@@ -63,10 +64,10 @@ import (
 	"time"
 
 	ratelimiter "github.com/teambition/ratelimiter-go"
-	redis "gopkg.in/redis.v4"
+	redis "gopkg.in/redis.v5"
 )
 
-var limiter *ratelimiter.Limiter
+var limiter ratelimiter.AbstractLimiter
 
 // Implements RedisClient for redis.Client
 type redisClient struct {
@@ -84,15 +85,21 @@ func (c *redisClient) RateScriptLoad(script string) (string, error) {
 }
 
 func init() {
+	var err error
+	// redis storage
 	client := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-
-	var err error
-	limiter, err = ratelimiter.New(&redisClient{client}, ratelimiter.Options{
+	limiter, err = ratelimiter.New(ratelimiter.Options{
+		Client:   &redisClient{client},
 		Max:      10,
 		Duration: time.Minute, // limit to 1000 requests in 1 minute.
 	})
+	// memory storage
+	// limiter, err = ratelimiter.New(ratelimiter.Options{
+	// 	Max:      10,
+	// 	Duration: time.Minute, // limit to 1000 requests in 1 minute.
+	// })
 	if err != nil {
 		panic(err)
 	}
@@ -130,23 +137,23 @@ func main() {
 ```
 
 ## API
-Package ratelimiter provides the fastest abstract rate limiter, base on go-redis/redis.
+Package ratelimiter provides the fastest abstract rate limiter, base on memory or go-redis/redis storage.
 ```go
   import "github.com/teambition/ratelimiter-go"
 ```
 
-### type Limiter
-Limiter struct.
+### type AbstractLimiter
 ```go
-type Limiter struct {
-    // contains filtered or unexported fields
+type AbstractLimiter interface {
+	Get(id string, policy ...int) (result Result, err error)
+	Remove(id string) error
 }
 ```
 
 #### func New
-New create a limiter with a redis client and options.
+New create a limiter with options.
 ```go
-func New(c RedisClient, opts Options) (*Limiter, error)
+func New(opts Options) (AbstractLimiter, error)
 ```
 
 Create a limiter with redis cluster:
@@ -160,7 +167,7 @@ client := redis.NewClusterClient(redis.ClusterOptions{Addrs: []string{
 	"localhost:7005",
 }})
 
-limiter, err := ratelimiter.New(&clusterClient{client}, limiterOptions)
+limiter, err := ratelimiter.New(limiterOptions { Client:&clusterClient{client}, })
 ```
 
 #### func (*Limiter) Get
@@ -198,6 +205,7 @@ func (l *Limiter) Remove(id string) error
 Options for Limiter
 ```go
 type Options struct {
+	Client   RedisClient   // The redis client for storing count data. Limiter will use memory to store data if the value is not specified.
     Max      int           // The max count in duration, default is 100.
     Duration time.Duration // Count duration, default is 1 Minute.
     Prefix   string        // Redis key prefix, default is "LIMIT:".
@@ -216,7 +224,7 @@ type RedisClient interface {
 
 Implements `RedisClient` for a simple redis client:
 ```go
-import "gopkg.in/redis.v4"
+import "gopkg.in/redis.v5"
 
 type redisClient struct {
 	*redis.Client
@@ -235,7 +243,7 @@ func (c *redisClient) RateScriptLoad(script string) (string, error) {
 
 Implements `RedisClient` for a cluster redis client:
 ```go
-import "gopkg.in/redis.v4"
+import "gopkg.in/redis.v5"
 
 type clusterClient struct {
 	*redis.ClusterClient
@@ -265,7 +273,7 @@ Uses it:
 client := redis.NewClient(&redis.Options{
 	Addr: "localhost:6379",
 })
-res, err := ratelimiter.New(redisClient{client}, ratelimiter.Options{})
+res, err := ratelimiter.New(ratelimiter.Options{ Client:redisClient{client}, })
 ```
 
 ### type Result
@@ -277,6 +285,19 @@ type Result struct {
     Duration  time.Duration // It Equals Options.Duration
     Reset     time.Time     // The limit recode reset time
 }
+```
+## Benchmark and Test
+```sh
+go test -bench="."
+```
+```sh
+BenchmarkGet-4                            100000               379 ns/op              96 B/op          3 allocs/op
+BenchmarkGetAndEexceeding-4               100000               368 ns/op              96 B/op          3 allocs/op
+BenchmarkGetAndParallel-4                 100000               379 ns/op              96 B/op          3 allocs/op
+BenchmarkGetAndClean-4                    100000               389 ns/op              96 B/op          3 allocs/op
+BenchmarkGetForDifferentUser-4             10000              1400 ns/op             467 B/op          8 allocs/op
+PASS
+ok      github.com/teambition/ratelimiter-go    8.443s
 ```
 
 ## Node.js version: [thunk-ratelimiter](https://github.com/thunks/thunk-ratelimiter)

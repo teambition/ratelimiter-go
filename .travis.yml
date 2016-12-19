@@ -10,6 +10,5 @@ services:
   - redis-server
 install:
   - go get gopkg.in/redis.v5
-  - go get github.com/onsi/ginkgo
-  - go get github.com/onsi/gomega
-script: go test
+  - go get github.com/stretchr/testify/assert
+script: go test .

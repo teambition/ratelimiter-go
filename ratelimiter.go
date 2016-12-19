@@ -68,6 +68,12 @@ type RedisClient interface {
 	RateScriptLoad(string) (string, error)
 }
 
+// AbstractLimiter struct.
+type AbstractLimiter interface {
+	Get(id string, policy ...int) (result Result, err error)
+	Remove(id string) error
+}
+
 // Limiter struct.
 type Limiter struct {
 	sha1, prefix, max, duration string
@@ -79,6 +85,7 @@ type Options struct {
 	Max      int           // The max count in duration, default is 100.
 	Duration time.Duration // Count duration, default is 1 Minute.
 	Prefix   string        // Redis key prefix, default is "LIMIT:".
+	Client   RedisClient   // Only usefull for redis store, requred.
 }
 
 // Result of limiter
@@ -89,7 +96,15 @@ type Result struct {
 	Reset     time.Time     // The limit recode reset time
 }
 
-// New create a limiter with a redis client and options
+//New ...
+func New(opts Options) (AbstractLimiter, error) {
+	if opts.Client == nil {
+		return newMemoryLimiter(opts), nil
+	}
+	return newRedisLimiter(opts.Client, opts)
+}
+
+//newRedisLimiter create a limiter with a redis client and options
 /*
 Create a limiter with redis cluster:
 
@@ -104,7 +119,7 @@ Create a limiter with redis cluster:
 
 	limiter, err := ratelimiter.New(&clusterClient{client}, limiterOptions)
 */
-func New(c RedisClient, opts Options) (*Limiter, error) {
+func newRedisLimiter(c RedisClient, opts Options) (*Limiter, error) {
 	var limiter *Limiter
 
 	sha1, err := c.RateScriptLoad(lua)
