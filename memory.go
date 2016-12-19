@@ -102,7 +102,7 @@ func (l *Memory) Clean() {
 	l.lock.Lock()
 	defer l.lock.Unlock()
 	for key, value := range l.store {
-		expire := value.expire.Add(time.Duration(value.duration) * time.Millisecond)
+		expire := value.expire.Add(value.duration)
 		if expire.Before(time.Now()) {
 			statusKey := "{" + key + "}:S"
 			delete(l.store, key)
