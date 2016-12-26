@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"os"
 	"sort"
 	"sync"
 	"testing"
@@ -23,9 +22,11 @@ type redisClient struct {
 func (c *redisClient) RateDel(key string) error {
 	return c.Del(key).Err()
 }
+
 func (c *redisClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
 	return c.EvalSha(sha1, keys, args...).Result()
 }
+
 func (c *redisClient) RateScriptLoad(script string) (string, error) {
 	return c.ScriptLoad(script).Result()
 }
@@ -38,9 +39,11 @@ type clusterClient struct {
 func (c *clusterClient) RateDel(key string) error {
 	return c.Del(key).Err()
 }
+
 func (c *clusterClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
 	return c.EvalSha(sha1, keys, args...).Result()
 }
+
 func (c *clusterClient) RateScriptLoad(script string) (string, error) {
 	var sha1 string
 	err := c.ForEachMaster(func(client *redis.Client) error {
@@ -61,9 +64,11 @@ type ringClient struct {
 func (c *ringClient) RateDel(key string) error {
 	return c.Del(key).Err()
 }
+
 func (c *ringClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
 	return c.EvalSha(sha1, keys, args...).Result()
 }
+
 func (c *ringClient) RateScriptLoad(script string) (string, error) {
 	var sha1 string
 	err := c.ForEachShard(func(client *redis.Client) error {
@@ -76,35 +81,22 @@ func (c *ringClient) RateScriptLoad(script string) (string, error) {
 	return sha1, err
 }
 
-var client = redis.NewClient(&redis.Options{
-	Addr: "localhost:6379",
-})
-var limiter *ratelimiter.Limiter
-
-func TestMain(m *testing.M) {
-
-	code := m.Run()
-	client.Close()
-	os.Exit(code)
-}
-
-func TestRedis(t *testing.T) {
-	assert := assert.New(t)
-
-	pong, err := client.Ping().Result()
-	assert.Nil(err)
-	assert.Equal("PONG", pong)
-}
 func TestRatelimiterGo(t *testing.T) {
-	assert := assert.New(t)
-	t.Run("ratelimiter.New, With default options", func(t *testing.T) {
+	var client = redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+	pong, err := client.Ping().Result()
+	assert.Nil(t, err)
+	assert.Equal(t, "PONG", pong)
+	defer client.Close()
 
-		var limiter ratelimiter.AbstractLimiter
+	t.Run("ratelimiter.New, With default options", func(t *testing.T) {
+		assert := assert.New(t)
+
+		var limiter *ratelimiter.Limiter
 		var id = genID()
 		t.Run("ratelimiter.New", func(t *testing.T) {
-			res, err := ratelimiter.New(ratelimiter.Options{Client: &redisClient{client}})
-			assert.Nil(err)
-			limiter = res
+			limiter = ratelimiter.New(ratelimiter.Options{Client: &redisClient{client}})
 		})
 
 		t.Run("limiter.Get", func(t *testing.T) {
@@ -120,6 +112,7 @@ func TestRatelimiterGo(t *testing.T) {
 			assert.Equal(res.Total, 100)
 			assert.Equal(res.Remaining, 98)
 		})
+
 		t.Run("limiter.Remove", func(t *testing.T) {
 			err := limiter.Remove(id)
 			assert.Nil(err)
@@ -132,6 +125,7 @@ func TestRatelimiterGo(t *testing.T) {
 			assert.Equal(res.Total, 100)
 			assert.Equal(res.Remaining, 99)
 		})
+
 		t.Run("limiter.Get with invalid args", func(t *testing.T) {
 			_, err := limiter.Get(id, 10)
 			assert.Equal("ratelimiter: must be paired values", err.Error())
@@ -140,21 +134,21 @@ func TestRatelimiterGo(t *testing.T) {
 			assert.Equal("ratelimiter: must be positive integer", err2.Error())
 
 			_, err3 := limiter.Get(id, 10, 0)
-
 			assert.Equal("ratelimiter: must be positive integer", err3.Error())
 		})
 	})
+
 	t.Run("ratelimiter.New, With options", func(t *testing.T) {
-		var limiter ratelimiter.AbstractLimiter
+		assert := assert.New(t)
+
+		var limiter *ratelimiter.Limiter
 		var id = genID()
 		t.Run("ratelimiter.New", func(t *testing.T) {
-			res, err := ratelimiter.New(ratelimiter.Options{
+			limiter = ratelimiter.New(ratelimiter.Options{
 				Client:   &redisClient{client},
 				Max:      3,
 				Duration: time.Second,
 			})
-			assert.Nil(err)
-			limiter = res
 		})
 
 		t.Run("limiter.Get", func(t *testing.T) {
@@ -236,8 +230,8 @@ func TestRatelimiterGo(t *testing.T) {
 			assert.Equal(2, res.Total)
 			assert.Equal(1, res.Remaining)
 			assert.Equal(time.Millisecond*100, res.Duration)
-
 		})
+
 		t.Run("limiter.Get with multi-policy for expired", func(t *testing.T) {
 			id := genID()
 			policy := []int{2, 100, 2, 200, 1, 200, 1, 300}
@@ -335,16 +329,15 @@ func TestRatelimiterGo(t *testing.T) {
 	})
 
 	t.Run("ratelimiter.New, Chaos", func(t *testing.T) {
-
 		t.Run("10 limiters work for one id", func(t *testing.T) {
+			assert := assert.New(t)
 
 			var wg sync.WaitGroup
 			var id = genID()
 			var result = NewResult(make([]int, 10000))
-
 			var redisOptions = redis.Options{Addr: "localhost:6379"}
 
-			var worker = func(c *redis.Client, l ratelimiter.AbstractLimiter) {
+			var worker = func(c *redis.Client, l *ratelimiter.Limiter) {
 				defer wg.Done()
 				defer c.Close()
 
@@ -358,9 +351,7 @@ func TestRatelimiterGo(t *testing.T) {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewClient(&redisOptions)
-
-				limiter, err := ratelimiter.New(ratelimiter.Options{Client: &redisClient{client}, Max: 9998})
-				assert.Nil(err)
+				limiter := ratelimiter.New(ratelimiter.Options{Client: &redisClient{client}, Max: 9998})
 				go worker(client, limiter)
 			}
 
@@ -377,17 +368,17 @@ func TestRatelimiterGo(t *testing.T) {
 	t.Run("ratelimiter.New with redis ring, Chaos", func(t *testing.T) {
 		t.Run("10 limiters work for one id", func(t *testing.T) {
 			t.Skip("Can't run in travis")
+			assert := assert.New(t)
 
 			var wg sync.WaitGroup
 			var id = genID()
 			var result = NewResult(make([]int, 10000))
-
 			var redisOptions = redis.RingOptions{Addrs: map[string]string{
 				"a": "localhost:6379",
 				"b": "localhost:6380",
 			}}
 
-			var worker = func(c *redis.Ring, l ratelimiter.AbstractLimiter) {
+			var worker = func(c *redis.Ring, l *ratelimiter.Limiter) {
 				defer wg.Done()
 				defer c.Close()
 
@@ -401,8 +392,7 @@ func TestRatelimiterGo(t *testing.T) {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewRing(&redisOptions)
-				limiter, err := ratelimiter.New(ratelimiter.Options{Client: &ringClient{client}, Max: 9998})
-				assert.Nil(err)
+				limiter := ratelimiter.New(ratelimiter.Options{Client: &ringClient{client}, Max: 9998})
 				go worker(client, limiter)
 			}
 
@@ -419,11 +409,11 @@ func TestRatelimiterGo(t *testing.T) {
 	t.Run("ratelimiter.New with redis cluster, Chaos", func(t *testing.T) {
 		t.Run("10 limiters work for one id", func(t *testing.T) {
 			t.Skip("Can't run in travis")
+			assert := assert.New(t)
 
 			var wg sync.WaitGroup
 			var id = genID()
 			var result = NewResult(make([]int, 10000))
-
 			var redisOptions = redis.ClusterOptions{Addrs: []string{
 				"localhost:7000",
 				"localhost:7001",
@@ -433,7 +423,7 @@ func TestRatelimiterGo(t *testing.T) {
 				"localhost:7005",
 			}}
 
-			var worker = func(c *redis.ClusterClient, l ratelimiter.AbstractLimiter) {
+			var worker = func(c *redis.ClusterClient, l *ratelimiter.Limiter) {
 				defer wg.Done()
 				defer c.Close()
 
@@ -447,8 +437,7 @@ func TestRatelimiterGo(t *testing.T) {
 			wg.Add(10)
 			for i := 0; i < 10; i++ {
 				client := redis.NewClusterClient(&redisOptions)
-				limiter, err := ratelimiter.New(ratelimiter.Options{Client: &clusterClient{client}, Max: 9998})
-				assert.Nil(err)
+				limiter := ratelimiter.New(ratelimiter.Options{Client: &clusterClient{client}, Max: 9998})
 				go worker(client, limiter)
 			}
 

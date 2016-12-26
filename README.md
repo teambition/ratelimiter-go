@@ -2,27 +2,10 @@ ratelimiter-go
 ==========
 The fastest abstract rate limiter, base on memory or redis storage.
 
-[![Build Status][travis-image]][travis-url]
-
-Summary
--------
-- [Requirements](#requirements)
-- [Features](#features)
-- [Installation](#installation)
-- [HTTP Server Demo](#http-server-demo)
-- [API](#api)
-	- [type AbstractLimiter](#type-abstractlimiter)
-		- [func New](#func-new)
-		- [func (*Limiter) Get](#func-limiter-get)
-		- [func (*Limiter) Remove](#func-limiter-remove)
-	- [type Options](#type-options)
-	- [type RedisClient](#type-redisclient)
-	- [type Result](#type-result)
-- [License MIT](#license)
-
-## Requirements
-
-- Redis 3+ (required if specify redis storage)
+[![Build Status](http://img.shields.io/travis/teambition/ratelimiter-go.svg?style=flat-square)](https://travis-ci.org/teambition/ratelimiter-go)
+[![Coverage Status](http://img.shields.io/coveralls/teambition/ratelimiter-go.svg?style=flat-square)](https://coveralls.io/r/teambition/ratelimiter-go)
+[![License](http://img.shields.io/badge/license-mit-blue.svg?style=flat-square)](https://raw.githubusercontent.com/teambition/ratelimiter-go/master/LICENSE)
+[![GoDoc](http://img.shields.io/badge/go-documentation-blue.svg?style=flat-square)](http://godoc.org/github.com/teambition/ratelimiter-go)
 
 ## Features
 
@@ -35,21 +18,15 @@ Summary
 ## Installation
 
 ```sh
-glide get github.com/teambition/ratelimiter-go
-```
-
-or
-```sh
 go get github.com/teambition/ratelimiter-go
 ```
 
 ## HTTP Server Demo
-
 Try into `github.com/teambition/ratelimiter-go` directory:
-```sh
-go run ratelimiter/main.go
-```
 
+```sh
+go run example/main.go
+```
 Visit: http://127.0.0.1:8080/
 
 ```go
@@ -67,8 +44,6 @@ import (
 	redis "gopkg.in/redis.v5"
 )
 
-var limiter ratelimiter.AbstractLimiter
-
 // Implements RedisClient for redis.Client
 type redisClient struct {
 	*redis.Client
@@ -84,28 +59,23 @@ func (c *redisClient) RateScriptLoad(script string) (string, error) {
 	return c.ScriptLoad(script).Result()
 }
 
-func init() {
-	var err error
-	// redis storage
-	client := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
-	limiter, err = ratelimiter.New(ratelimiter.Options{
-		Client:   &redisClient{client},
-		Max:      10,
-		Duration: time.Minute, // limit to 1000 requests in 1 minute.
-	})
-	// memory storage
-	// limiter, err = ratelimiter.New(ratelimiter.Options{
+func main() {
+	// use memory
+	// limiter := ratelimiter.New(ratelimiter.Options{
 	// 	Max:      10,
 	// 	Duration: time.Minute, // limit to 1000 requests in 1 minute.
 	// })
-	if err != nil {
-		panic(err)
-	}
-}
 
-func main() {
+	// or use redis
+	client := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+	limiter := ratelimiter.New(ratelimiter.Options{
+		Max:      10,
+		Duration: time.Minute, // limit to 1000 requests in 1 minute.
+		Client:   &redisClient{client},
+	})
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		res, err := limiter.Get(r.URL.Path)
 		if err != nil {
@@ -136,175 +106,11 @@ func main() {
 }
 ```
 
-## API
-Package ratelimiter provides the fastest abstract rate limiter, base on memory or go-redis/redis storage.
-```go
-  import "github.com/teambition/ratelimiter-go"
-```
-
-### type AbstractLimiter
-```go
-type AbstractLimiter interface {
-	Get(id string, policy ...int) (result Result, err error)
-	Remove(id string) error
-}
-```
-
-#### func New
-New create a limiter with options.
-```go
-func New(opts Options) (AbstractLimiter, error)
-```
-
-Create a limiter with redis cluster:
-```go
-client := redis.NewClusterClient(redis.ClusterOptions{Addrs: []string{
-	"localhost:7000",
-	"localhost:7001",
-	"localhost:7002",
-	"localhost:7003",
-	"localhost:7004",
-	"localhost:7005",
-}})
-
-limiter, err := ratelimiter.New(limiterOptions { Client:&clusterClient{client}, })
-```
-
-#### func (*Limiter) Get
-Get get a limiter result for id. support custom limiter policy.
-```go
-func (l *Limiter) Get(id string, policy ...int) (Result, error)
-```
-
-Get get a limiter result:
-```go
-userID := "user-123456"
-res, err := limiter.Get(userID)
-if err == nil {
-	fmt.Println(res.Reset)     // 2016-10-11 21:17:53.362 +0800 CST
-	fmt.Println(res.Total)     // 100
-	fmt.Println(res.Remaining) // 100
-	fmt.Println(res.Duration)  // 1m
-}
-```
-
-Get get a limiter result with custom limiter policy:
-```go
-id := "id-123456"
-policy := []int{100, 60000, 50, 60000, 50, 120000}
-res, err := limiter.Get(id, policy...)
-```
-
-#### func (*Limiter) Remove
-Remove remove limiter record for id
-```go
-func (l *Limiter) Remove(id string) error
-```
-
-### type Options
-Options for Limiter
-```go
-type Options struct {
-	Client   RedisClient   // The redis client for storing count data. Limiter will use memory to store data if the value is not specified.
-    Max      int           // The max count in duration, default is 100.
-    Duration time.Duration // Count duration, default is 1 Minute.
-    Prefix   string        // Redis key prefix, default is "LIMIT:".
-}
-```
-
-### type RedisClient
-RedisClient defines a redis client struct that ratelimiter need. Examples: https://github.com/teambition/ratelimiter-go/blob/master/ratelimiter_test.go#L18
-```go
-type RedisClient interface {
-    RateDel(string) error
-    RateEvalSha(string, []string, ...interface{}) (interface{}, error)
-    RateScriptLoad(string) (string, error)
-}
-```
-
-Implements `RedisClient` for a simple redis client:
-```go
-import "gopkg.in/redis.v5"
-
-type redisClient struct {
-	*redis.Client
-}
-
-func (c *redisClient) RateDel(key string) error {
-	return c.Del(key).Err()
-}
-func (c *redisClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
-	return c.EvalSha(sha1, keys, args...).Result()
-}
-func (c *redisClient) RateScriptLoad(script string) (string, error) {
-	return c.ScriptLoad(lua).Result()
-}
-```
-
-Implements `RedisClient` for a cluster redis client:
-```go
-import "gopkg.in/redis.v5"
-
-type clusterClient struct {
-	*redis.ClusterClient
-}
-
-func (c *clusterClient) RateDel(key string) error {
-	return c.Del(key).Err()
-}
-func (c *clusterClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
-	return c.EvalSha(sha1, keys, args...).Result()
-}
-func (c *clusterClient) RateScriptLoad(script string) (string, error) {
-	var sha1 string
-	err := c.ForEachMaster(func(client *redis.Client) error {
-		res, err := client.ScriptLoad(script).Result()
-		if err == nil {
-			sha1 = res
-		}
-		return err
-	})
-	return sha1, err
-}
-```
-
-Uses it:
-```go
-client := redis.NewClient(&redis.Options{
-	Addr: "localhost:6379",
-})
-res, err := ratelimiter.New(ratelimiter.Options{ Client:redisClient{client}, })
-```
-
-### type Result
-Result of limiter
-```go
-type Result struct {
-    Total     int           // It Equals Options.Max
-    Remaining int           // It will always >= -1
-    Duration  time.Duration // It Equals Options.Duration
-    Reset     time.Time     // The limit recode reset time
-}
-```
-## Benchmark and Test
-```sh
-go test -bench="."
-```
-```sh
-BenchmarkGet-4                            100000               379 ns/op              96 B/op          3 allocs/op
-BenchmarkGetAndEexceeding-4               100000               368 ns/op              96 B/op          3 allocs/op
-BenchmarkGetAndParallel-4                 100000               379 ns/op              96 B/op          3 allocs/op
-BenchmarkGetAndClean-4                    100000               389 ns/op              96 B/op          3 allocs/op
-BenchmarkGetForDifferentUser-4             10000              1400 ns/op             467 B/op          8 allocs/op
-PASS
-ok      github.com/teambition/ratelimiter-go    8.443s
-```
-
 ## Node.js version: [thunk-ratelimiter](https://github.com/thunks/thunk-ratelimiter)
+
+## Documentation
+The docs can be found at [godoc.org](https://godoc.org/github.com/teambition/ratelimiter-go), as usual.
 
 ## License
 `ratelimiter-go` is licensed under the [MIT](https://github.com/teambition/ratelimiter-go/blob/master/LICENSE) license.
 Copyright &copy; 2016 [Teambition](https://www.teambition.com).
-
-[travis-url]: https://travis-ci.org/teambition/ratelimiter-go
-[travis-image]: http://img.shields.io/travis/teambition/ratelimiter-go.svg

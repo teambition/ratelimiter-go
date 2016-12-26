@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-//Options ...
+// policy status
 type statusCacheItem struct {
 	index  int
 	expire time.Time
 }
 
-// LimiterCacheItem of limiter
+// limit status
 type limiterCacheItem struct {
 	total     int
 	remaining int
@@ -21,126 +21,84 @@ type limiterCacheItem struct {
 	lock      sync.Mutex
 }
 
-//Memory ...
-type Memory struct {
-	lock    sync.RWMutex
-	status  map[string]*statusCacheItem
-	store   map[string]*limiterCacheItem
-	ticker  *time.Ticker
-	options *Options
+type memoryLimiter struct {
+	max      int
+	duration time.Duration
+	status   map[string]*statusCacheItem
+	store    map[string]*limiterCacheItem
+	ticker   *time.Ticker
+	lock     sync.RWMutex
 }
 
-func newMemoryLimiter(opts Options) (limiter *Memory) {
-	limiter = &Memory{
-		options: &opts,
+func newMemoryLimiter(opts *Options) *Limiter {
+	m := &memoryLimiter{
+		max:      opts.Max,
+		duration: opts.Duration,
+		store:    make(map[string]*limiterCacheItem),
+		status:   make(map[string]*statusCacheItem),
+		ticker:   time.NewTicker(time.Minute),
 	}
-	if limiter.options.Duration == 0 {
-		limiter.options.Duration = time.Minute
-	}
-	if limiter.options.Prefix == "" {
-		limiter.options.Prefix = "LIMIT:"
-	}
-	if limiter.options.Max == 0 {
-		limiter.options.Max = 100
-	}
-	limiter.store = make(map[string]*limiterCacheItem)
-	limiter.status = make(map[string]*statusCacheItem)
-
-	duration := 60 * time.Second
-	limiter.ticker = time.NewTicker(duration)
-	go limiter.cleanCache()
-	return
+	go m.cleanCache()
+	return &Limiter{m, opts.Prefix}
 }
 
-//Get ...
-func (l *Memory) Get(id string, policy ...int) (result Result, err error) {
-
-	key := l.options.Prefix + id
-
+// abstractLimiter interface
+func (m *memoryLimiter) getLimit(key string, policy ...int) ([]interface{}, error) {
 	length := len(policy)
-	if odd := length % 2; odd == 1 {
-		return result, errors.New("ratelimiter: must be paired values")
-	}
-	var p []int
+	var args []int
 	if length == 0 {
-		p = []int{l.options.Max, int(l.options.Duration / time.Millisecond)}
+		args = []int{m.max, int(m.duration / time.Millisecond)}
 	} else {
-		p = make([]int, length)
+		args = make([]int, length)
 		for i, val := range policy {
 			if val <= 0 {
-				return result, errors.New("ratelimiter: must be positive integer")
+				return nil, errors.New("ratelimiter: must be positive integer")
 			}
-			p[i] = policy[i]
+			args[i] = policy[i]
 		}
 	}
-	return l.getResult(key, p...)
+
+	res := m.getItem(key, args...)
+	res.lock.Lock()
+	defer res.lock.Unlock()
+	return []interface{}{res.remaining, res.total, res.duration, res.expire}, nil
 }
 
-//Remove ...
-func (l *Memory) Remove(id string) error {
-	key := l.options.Prefix + id
+// abstractLimiter interface
+func (m *memoryLimiter) removeLimit(key string) error {
 	statusKey := "{" + key + "}:S"
-
-	l.lock.Lock()
-	defer l.lock.Unlock()
-	delete(l.store, key)
-	delete(l.status, statusKey)
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	delete(m.store, key)
+	delete(m.status, statusKey)
 	return nil
 }
 
-//Count ...
-func (l *Memory) Count() int {
-
-	l.lock.RLock()
-	defer l.lock.RUnlock()
-	return len(l.store)
-}
-
-//Clean ...
-func (l *Memory) Clean() {
-
-	l.lock.Lock()
-	defer l.lock.Unlock()
-	for key, value := range l.store {
+func (m *memoryLimiter) clean() {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	for key, value := range m.store {
 		expire := value.expire.Add(value.duration)
 		if expire.Before(time.Now()) {
 			statusKey := "{" + key + "}:S"
-			delete(l.store, key)
-			delete(l.status, statusKey)
+			delete(m.store, key)
+			delete(m.status, statusKey)
 		}
 	}
 }
 
-func (l *Memory) getResult(id string, policy ...int) (Result, error) {
-	var result Result
-	res := l.getLimit(id, policy...)
-
-	res.lock.Lock()
-	remaining := res.remaining
-	total := res.total
-	res.lock.Unlock()
-
-	result = Result{
-		Remaining: remaining,
-		Total:     total,
-		Duration:  res.duration,
-		Reset:     res.expire,
-	}
-	return result, nil
-}
-func (l *Memory) getLimit(key string, args ...int) (res *limiterCacheItem) {
-
+func (m *memoryLimiter) getItem(key string, args ...int) (res *limiterCacheItem) {
 	policyCount := len(args) / 2
 	total := args[0]
 	duration := args[1]
 	statusKey := "{" + key + "}:S"
 
-	l.lock.Lock()
+	m.lock.Lock()
 	var ok bool
-	if res, ok = l.store[key]; ok {
-		statusItem, _ := l.status[statusKey]
-		l.lock.Unlock()
+	if res, ok = m.store[key]; ok {
+		statusItem, _ := m.status[statusKey]
 
+		m.lock.Unlock()
 		res.lock.Lock()
 		defer res.lock.Unlock()
 		if res.expire.Before(time.Now()) {
@@ -169,6 +127,7 @@ func (l *Memory) getLimit(key string, args ...int) (res *limiterCacheItem) {
 			res.remaining--
 		}
 	} else {
+		defer m.lock.Unlock()
 		res = &limiterCacheItem{
 			total:     total,
 			remaining: total - 1,
@@ -179,15 +138,15 @@ func (l *Memory) getLimit(key string, args ...int) (res *limiterCacheItem) {
 			index:  1,
 			expire: time.Now().Add(time.Duration(duration) * time.Millisecond * 2),
 		}
-		l.store[key] = res
-		l.status[statusKey] = status
-		l.lock.Unlock()
+		m.store[key] = res
+		m.status[statusKey] = status
 	}
 	return
 }
-func (l *Memory) cleanCache() {
-	for now := range l.ticker.C {
+
+func (m *memoryLimiter) cleanCache() {
+	for now := range m.ticker.C {
 		var _ = now
-		l.Clean()
+		m.clean()
 	}
 }

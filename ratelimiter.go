@@ -2,7 +2,6 @@ package ratelimiter
 
 import (
 	"errors"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -60,7 +59,7 @@ Uses it:
 	client := redis.NewClient(&redis.Options{
 		Addr: "localhost:6379",
 	})
-	res, err := ratelimiter.New(redisClient{client}, ratelimiter.Options{})
+	limiter := ratelimiter.New(ratelimiter.Options{Client: redisClient{client}})
 */
 type RedisClient interface {
 	RateDel(string) error
@@ -68,79 +67,63 @@ type RedisClient interface {
 	RateScriptLoad(string) (string, error)
 }
 
-// AbstractLimiter struct.
-type AbstractLimiter interface {
-	Get(id string, policy ...int) (result Result, err error)
-	Remove(id string) error
-}
-
 // Limiter struct.
 type Limiter struct {
-	sha1, prefix, max, duration string
-	rc                          RedisClient
+	abstractLimiter
+	prefix string
 }
 
 // Options for Limiter
 type Options struct {
-	Max      int           // The max count in duration, default is 100.
-	Duration time.Duration // Count duration, default is 1 Minute.
+	Max      int           // The max count in duration for no policy, default is 100.
+	Duration time.Duration // Count duration for no policy, default is 1 Minute.
 	Prefix   string        // Redis key prefix, default is "LIMIT:".
-	Client   RedisClient   // Only usefull for redis store, requred.
+	Client   RedisClient   // Use a redis client for limiter, if omit, it will use a memory limiter.
 }
 
-// Result of limiter
+// Result of limiter.Get
 type Result struct {
-	Total     int           // It Equals Options.Max
+	Total     int           // It Equals Options.Max, or policy max
 	Remaining int           // It will always >= -1
-	Duration  time.Duration // It Equals Options.Duration
-	Reset     time.Time     // The limit recode reset time
+	Duration  time.Duration // It Equals Options.Duration, or policy duration
+	Reset     time.Time     // The limit record reset time
 }
 
-//New ...
-func New(opts Options) (AbstractLimiter, error) {
+// New returns a Limiter instance with given options.
+// If options.Client omit, the limiter is a memory limiter
+func New(opts Options) *Limiter {
+	if opts.Prefix == "" {
+		opts.Prefix = "LIMIT:"
+	}
+	if opts.Max <= 0 {
+		opts.Max = 100
+	}
+	if opts.Duration <= 0 {
+		opts.Duration = time.Minute
+	}
 	if opts.Client == nil {
-		return newMemoryLimiter(opts), nil
+		return newMemoryLimiter(&opts)
 	}
-	return newRedisLimiter(opts.Client, opts)
+	return newRedisLimiter(&opts)
 }
 
-//newRedisLimiter create a limiter with a redis client and options
-/*
-Create a limiter with redis cluster:
+type abstractLimiter interface {
+	getLimit(key string, policy ...int) ([]interface{}, error)
+	removeLimit(key string) error
+}
 
-	client := redis.NewClusterClient(redis.ClusterOptions{Addrs: []string{
-		"localhost:7000",
-		"localhost:7001",
-		"localhost:7002",
-		"localhost:7003",
-		"localhost:7004",
-		"localhost:7005",
-	}})
-
-	limiter, err := ratelimiter.New(&clusterClient{client}, limiterOptions)
-*/
-func newRedisLimiter(c RedisClient, opts Options) (*Limiter, error) {
-	var limiter *Limiter
-
-	sha1, err := c.RateScriptLoad(lua)
+func newRedisLimiter(opts *Options) *Limiter {
+	sha1, err := opts.Client.RateScriptLoad(lua)
 	if err != nil {
-		return limiter, err
+		panic(err)
 	}
-
-	prefix := opts.Prefix
-	if prefix == "" {
-		prefix = "LIMIT:"
+	r := &redisLimiter{
+		rc:       opts.Client,
+		sha1:     sha1,
+		max:      strconv.FormatInt(int64(opts.Max), 10),
+		duration: strconv.FormatInt(int64(opts.Duration/time.Millisecond), 10),
 	}
-	max := "100"
-	if opts.Max > 0 {
-		max = strconv.FormatInt(int64(opts.Max), 10)
-	}
-	duration := "60000"
-	if opts.Duration > 0 {
-		duration = strconv.FormatInt(int64(opts.Duration/time.Millisecond), 10)
-	}
-	limiter = &Limiter{rc: c, sha1: sha1, prefix: prefix, max: max, duration: duration}
-	return limiter, nil
+	return &Limiter{r, opts.Prefix}
 }
 
 // Get get a limiter result for id. support custom limiter policy.
@@ -164,14 +147,54 @@ Get get a limiter result with custom limiter policy:
 */
 func (l *Limiter) Get(id string, policy ...int) (Result, error) {
 	var result Result
-	keys := []string{l.prefix + id}
+	key := l.prefix + id
 
-	length := len(policy)
-	if odd := length % 2; odd == 1 {
+	if odd := len(policy) % 2; odd == 1 {
 		return result, errors.New("ratelimiter: must be paired values")
 	}
 
+	res, err := l.getLimit(key, policy...)
+	if err != nil {
+		return result, err
+	}
+
+	result = Result{}
+	switch res[3].(type) {
+	case time.Time: // result from memory limiter
+		result.Remaining = res[0].(int)
+		result.Total = res[1].(int)
+		result.Duration = res[2].(time.Duration)
+		result.Reset = res[3].(time.Time)
+	default: // result from redis limiter
+		result.Remaining = int(res[0].(int64))
+		result.Total = int(res[1].(int64))
+		result.Duration = time.Duration(res[2].(int64) * 1e6)
+
+		timestamp := res[3].(int64)
+		sec := timestamp / 1000
+		result.Reset = time.Unix(sec, (timestamp-(sec*1000))*1e6)
+	}
+	return result, nil
+}
+
+// Remove remove limiter record for id
+func (l *Limiter) Remove(id string) error {
+	return l.removeLimit(l.prefix + id)
+}
+
+type redisLimiter struct {
+	sha1, max, duration string
+	rc                  RedisClient
+}
+
+func (r *redisLimiter) removeLimit(key string) error {
+	return r.rc.RateDel(key)
+}
+
+func (r *redisLimiter) getLimit(key string, policy ...int) ([]interface{}, error) {
+	keys := []string{key}
 	capacity := 3
+	length := len(policy)
 	if length > 2 {
 		capacity = length + 1
 	}
@@ -179,50 +202,34 @@ func (l *Limiter) Get(id string, policy ...int) (Result, error) {
 	args := make([]interface{}, capacity, capacity)
 	args[0] = genTimestamp()
 	if length == 0 {
-		args[1] = l.max
-		args[2] = l.duration
+		args[1] = r.max
+		args[2] = r.duration
 	} else {
 		for i, val := range policy {
 			if val <= 0 {
-				return result, errors.New("ratelimiter: must be positive integer")
+				return nil, errors.New("ratelimiter: must be positive integer")
 			}
 			args[i+1] = strconv.FormatInt(int64(val), 10)
 		}
 	}
 
-	res, err := l.getLimit(keys[0:1], args...)
-	if err != nil {
-		return result, err
-	}
-
-	arr := reflect.ValueOf(res)
-	timestamp := arr.Index(3).Interface().(int64)
-	sec := timestamp / 1000
-	nsec := (timestamp - (sec * 1000)) * 1e6
-	result = Result{
-		Remaining: int(arr.Index(0).Interface().(int64)),
-		Total:     int(arr.Index(1).Interface().(int64)),
-		Duration:  time.Duration(arr.Index(2).Interface().(int64) * 1e6),
-		Reset:     time.Unix(sec, nsec),
-	}
-	return result, nil
-}
-
-// Remove remove limiter record for id
-func (l *Limiter) Remove(id string) error {
-	return l.rc.RateDel(l.prefix + id)
-}
-
-func (l *Limiter) getLimit(keys []string, args ...interface{}) (res interface{}, err error) {
-	res, err = l.rc.RateEvalSha(l.sha1, keys, args...)
+	res, err := r.rc.RateEvalSha(r.sha1, keys, args...)
 	if err != nil && isNoScriptErr(err) {
 		// try to load lua for cluster client and ring client for nodes changing.
-		_, err = l.rc.RateScriptLoad(lua)
+		_, err = r.rc.RateScriptLoad(lua)
 		if err == nil {
-			res, err = l.rc.RateEvalSha(l.sha1, keys, args...)
+			res, err = r.rc.RateEvalSha(r.sha1, keys, args...)
 		}
 	}
-	return
+
+	if err == nil {
+		arr, ok := res.([]interface{})
+		if ok && len(arr) == 4 {
+			return arr, nil
+		}
+		err = errors.New("Invalid result")
+	}
+	return nil, err
 }
 
 func genTimestamp() string {
@@ -231,12 +238,7 @@ func genTimestamp() string {
 }
 
 func isNoScriptErr(err error) bool {
-	var no bool
-	s := err.Error()
-	if strings.HasPrefix(s, "NOSCRIPT ") {
-		no = true
-	}
-	return no
+	return strings.HasPrefix(err.Error(), "NOSCRIPT ")
 }
 
 // copy from ./ratelimiter.lua

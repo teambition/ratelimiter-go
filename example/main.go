@@ -14,8 +14,6 @@ import (
 	redis "gopkg.in/redis.v5"
 )
 
-var limiter ratelimiter.AbstractLimiter
-
 // Implements RedisClient for redis.Client
 type redisClient struct {
 	*redis.Client
@@ -31,28 +29,23 @@ func (c *redisClient) RateScriptLoad(script string) (string, error) {
 	return c.ScriptLoad(script).Result()
 }
 
-func init() {
-	var err error
-	// redis storage
-	client := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
-	limiter, err = ratelimiter.New(ratelimiter.Options{
-		Client:   &redisClient{client},
-		Max:      10,
-		Duration: time.Minute, // limit to 1000 requests in 1 minute.
-	})
-	// memory storage
-	// limiter, err = ratelimiter.New(ratelimiter.Options{
+func main() {
+	// use memory
+	// limiter := ratelimiter.New(ratelimiter.Options{
 	// 	Max:      10,
 	// 	Duration: time.Minute, // limit to 1000 requests in 1 minute.
 	// })
-	if err != nil {
-		panic(err)
-	}
-}
 
-func main() {
+	// or use redis
+	client := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
+	limiter := ratelimiter.New(ratelimiter.Options{
+		Max:      10,
+		Duration: time.Minute, // limit to 1000 requests in 1 minute.
+		Client:   &redisClient{client},
+	})
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		res, err := limiter.Get(r.URL.Path)
 		if err != nil {

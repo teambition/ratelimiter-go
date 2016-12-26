@@ -2,13 +2,13 @@ sudo: false
 language: go
 go:
   - 1.7
-  - tip
-matrix:
-  allow_failures:
-    - go: tip
 services:
   - redis-server
-install:
-  - go get gopkg.in/redis.v5
-  - go get github.com/stretchr/testify/assert
-script: go test .
+before_install:
+  - go get -t -v ./...
+  - go get github.com/modocache/gover
+  - go get github.com/mattn/goveralls
+script:
+  - go test -coverprofile=ratelimiter.coverprofile
+  - gover
+  - goveralls -coverprofile=ratelimiter.coverprofile -service=travis-ci

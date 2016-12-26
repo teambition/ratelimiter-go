@@ -10,7 +10,7 @@ import (
 
 func BenchmarkGet(b *testing.B) {
 
-	limiter, _ := ratelimiter.New(ratelimiter.Options{})
+	limiter := ratelimiter.New(ratelimiter.Options{})
 	policy := []int{1000000, 1000}
 	id := getUniqueID()
 
@@ -23,7 +23,7 @@ func BenchmarkGet(b *testing.B) {
 }
 func BenchmarkGetAndEexceeding(b *testing.B) {
 
-	limiter, _ := ratelimiter.New(ratelimiter.Options{})
+	limiter := ratelimiter.New(ratelimiter.Options{})
 	policy := []int{100, 1000}
 	id := getUniqueID()
 
@@ -35,7 +35,7 @@ func BenchmarkGetAndEexceeding(b *testing.B) {
 	}
 }
 func BenchmarkGetAndParallel(b *testing.B) {
-	limiter, _ := ratelimiter.New(ratelimiter.Options{})
+	limiter := ratelimiter.New(ratelimiter.Options{})
 	policy := []int{1000000, 1000}
 	id := getUniqueID()
 
@@ -50,7 +50,7 @@ func BenchmarkGetAndParallel(b *testing.B) {
 	})
 }
 func BenchmarkGetAndClean(b *testing.B) {
-	limiter, _ := ratelimiter.New(ratelimiter.Options{})
+	limiter := ratelimiter.New(ratelimiter.Options{})
 	policy := []int{1000000, 1000}
 	id := getUniqueID()
 
@@ -66,7 +66,7 @@ func BenchmarkGetAndClean(b *testing.B) {
 	})
 }
 func BenchmarkGetForDifferentUser(b *testing.B) {
-	limiter, _ := ratelimiter.New(ratelimiter.Options{})
+	limiter := ratelimiter.New(ratelimiter.Options{})
 	policy := []int{1, 10000}
 
 	b.N = 10000
