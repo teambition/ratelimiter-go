@@ -15,6 +15,23 @@ import (
 )
 
 // Implements RedisClient for redis.Client
+type redisFailedClient struct {
+	*redis.Client
+}
+
+func (c *redisFailedClient) RateDel(key string) error {
+	return c.Del(key).Err()
+}
+
+func (c *redisFailedClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
+	return nil, errors.New("NOSCRIPT mock error")
+}
+
+func (c *redisFailedClient) RateScriptLoad(script string) (string, error) {
+	return c.ScriptLoad(script).Result()
+}
+
+// Implements RedisClient for redis.Client
 type redisClient struct {
 	*redis.Client
 }
@@ -449,6 +466,43 @@ func TestRatelimiterGo(t *testing.T) {
 				assert.Equal(s[i], i-2)
 			}
 		})
+	})
+	t.Run("ratelimiter with no redis machine should be", func(t *testing.T) {
+
+		var limiter *ratelimiter.Limiter
+		var client = redis.NewClient(&redis.Options{
+			Addr: "localhost:6380",
+		})
+
+		t.Run("ratelimiter.New", func(t *testing.T) {
+			defer func() {
+				if r := recover(); r == nil {
+					t.Errorf("ratelimiter with no redis machine should be error")
+				}
+			}()
+			limiter = ratelimiter.New(ratelimiter.Options{Client: &redisClient{client}})
+		})
+	})
+	t.Run("ratelimiter with redisFailedClient should be", func(t *testing.T) {
+		assert := assert.New(t)
+
+		var limiter *ratelimiter.Limiter
+		var client = redis.NewClient(&redis.Options{
+			Addr: "localhost:6379",
+		})
+
+		t.Run("ratelimiter.New", func(t *testing.T) {
+			limiter = ratelimiter.New(ratelimiter.Options{Client: &redisFailedClient{client}})
+		})
+		policy := []int{2, 100, 2, 200, 1, 300}
+		id := genID()
+		res, err := limiter.Get(id, policy...)
+		assert.Equal("NOSCRIPT mock error", err.Error())
+
+		assert.Equal(0, res.Total)
+		assert.Equal(0, res.Remaining)
+		assert.Equal(time.Duration(0), res.Duration)
+
 	})
 }
 
