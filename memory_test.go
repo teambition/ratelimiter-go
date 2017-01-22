@@ -61,9 +61,15 @@ func TestRateLimiter(t *testing.T) {
 		assert.Nil(err)
 		assert.Equal(10, res.Total)
 		assert.Equal(9, res.Remaining)
+		var wait sync.WaitGroup
+		wait.Add(100)
 		for i := 0; i < 100; i++ {
-			go limiter.Get(id, policy...)
+			go func() {
+				limiter.Get(id, policy...)
+				wait.Done()
+			}()
 		}
+		wait.Wait()
 		time.Sleep(200 * time.Millisecond)
 		res, err = limiter.Get(id, policy...)
 		assert.Nil(err)

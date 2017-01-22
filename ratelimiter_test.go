@@ -290,7 +290,7 @@ func TestRatelimiterGo(t *testing.T) {
 			assert.Equal(-1, res.Remaining)
 
 			// restore to First policy after Third policy*2 Duration
-			time.Sleep(res.Duration*2 + time.Millisecond)
+			time.Sleep(res.Duration*2 + 10*time.Millisecond)
 			res, err = limiter.Get(id, policy...)
 			assert.Nil(err)
 			assert.Equal(2, res.Total)
@@ -311,7 +311,7 @@ func TestRatelimiterGo(t *testing.T) {
 			assert.Equal(res.Duration, time.Millisecond*200)
 
 			//Third policy
-			time.Sleep(res.Duration + time.Millisecond)
+			time.Sleep(res.Duration + 10*time.Millisecond)
 			res, err = limiter.Get(id, policy...)
 			assert.Equal(1, res.Total)
 			assert.Equal(0, res.Remaining)
@@ -321,7 +321,7 @@ func TestRatelimiterGo(t *testing.T) {
 			assert.Equal(-1, res.Remaining)
 
 			//Fourth policy
-			time.Sleep(res.Duration + time.Millisecond)
+			time.Sleep(res.Duration + 10*time.Millisecond)
 			res, err = limiter.Get(id, policy...)
 			assert.Equal(1, res.Total)
 			assert.Equal(0, res.Remaining)
