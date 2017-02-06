@@ -18,7 +18,6 @@ type limiterCacheItem struct {
 	remaining int
 	duration  time.Duration
 	expire    time.Time
-	lock      sync.Mutex
 }
 
 type memoryLimiter struct {
@@ -27,7 +26,7 @@ type memoryLimiter struct {
 	status   map[string]*statusCacheItem
 	store    map[string]*limiterCacheItem
 	ticker   *time.Ticker
-	lock     sync.RWMutex
+	lock     sync.Mutex
 }
 
 func newMemoryLimiter(opts *Options) *Limiter {
@@ -36,7 +35,7 @@ func newMemoryLimiter(opts *Options) *Limiter {
 		duration: opts.Duration,
 		store:    make(map[string]*limiterCacheItem),
 		status:   make(map[string]*statusCacheItem),
-		ticker:   time.NewTicker(time.Minute),
+		ticker:   time.NewTicker(time.Second),
 	}
 	go m.cleanCache()
 	return &Limiter{m, opts.Prefix}
@@ -59,8 +58,8 @@ func (m *memoryLimiter) getLimit(key string, policy ...int) ([]interface{}, erro
 	}
 
 	res := m.getItem(key, args...)
-	res.lock.Lock()
-	defer res.lock.Unlock()
+	m.lock.Lock()
+	defer m.lock.Unlock()
 	return []interface{}{res.remaining, res.total, res.duration, res.expire}, nil
 }
 
@@ -77,13 +76,31 @@ func (m *memoryLimiter) removeLimit(key string) error {
 func (m *memoryLimiter) clean() {
 	m.lock.Lock()
 	defer m.lock.Unlock()
-	for key, value := range m.store {
-		expire := value.expire.Add(value.duration)
-		if expire.Before(time.Now()) {
-			statusKey := "{" + key + "}:S"
-			delete(m.store, key)
-			delete(m.status, statusKey)
+	start := time.Now()
+	expireTime := start.Add(time.Millisecond * 100)
+	frequency := 24
+	var expired int
+	for {
+	label:
+		for i := 0; i < frequency; i++ {
+			for key, value := range m.store {
+				if value.expire.Add(value.duration).Before(start) {
+					statusKey := "{" + key + "}:S"
+					delete(m.store, key)
+					delete(m.status, statusKey)
+					expired++
+				}
+				break
+			}
 		}
+		if expireTime.Before(time.Now()) {
+			return
+		}
+		if expired > frequency/4 {
+			expired = 0
+			goto label
+		}
+		return
 	}
 }
 
@@ -94,13 +111,10 @@ func (m *memoryLimiter) getItem(key string, args ...int) (res *limiterCacheItem)
 	statusKey := "{" + key + "}:S"
 
 	m.lock.Lock()
+	defer m.lock.Unlock()
 	var ok bool
 	if res, ok = m.store[key]; ok {
 		statusItem, _ := m.status[statusKey]
-
-		m.lock.Unlock()
-		res.lock.Lock()
-		defer res.lock.Unlock()
 		if res.expire.Before(time.Now()) {
 			if policyCount > 1 {
 				if statusItem.expire.Before(time.Now()) {
@@ -127,7 +141,6 @@ func (m *memoryLimiter) getItem(key string, args ...int) (res *limiterCacheItem)
 			res.remaining--
 		}
 	} else {
-		defer m.lock.Unlock()
 		res = &limiterCacheItem{
 			total:     total,
 			remaining: total - 1,
@@ -145,8 +158,7 @@ func (m *memoryLimiter) getItem(key string, args ...int) (res *limiterCacheItem)
 }
 
 func (m *memoryLimiter) cleanCache() {
-	for now := range m.ticker.C {
-		var _ = now
+	for range m.ticker.C {
 		m.clean()
 	}
 }
