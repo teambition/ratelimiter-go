@@ -12,54 +12,54 @@ import (
 /*
 Implements RedisClient for a simple redis client:
 
-	import "gopkg.in/redis.v4"
+    import "gopkg.in/redis.v4"
 
-	type redisClient struct {
-		*redis.Client
-	}
+    type redisClient struct {
+        *redis.Client
+    }
 
-	func (c *redisClient) RateDel(key string) error {
-		return c.Del(key).Err()
-	}
-	func (c *redisClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
-		return c.EvalSha(sha1, keys, args...).Result()
-	}
-	func (c *redisClient) RateScriptLoad(script string) (string, error) {
-		return c.ScriptLoad(lua).Result()
-	}
+    func (c *redisClient) RateDel(key string) error {
+        return c.Del(key).Err()
+    }
+    func (c *redisClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
+        return c.EvalSha(sha1, keys, args...).Result()
+    }
+    func (c *redisClient) RateScriptLoad(script string) (string, error) {
+        return c.ScriptLoad(lua).Result()
+    }
 
 Implements RedisClient for a cluster redis client:
 
-	import "gopkg.in/redis.v4"
+    import "gopkg.in/redis.v4"
 
-	type clusterClient struct {
-		*redis.ClusterClient
-	}
+    type clusterClient struct {
+        *redis.ClusterClient
+    }
 
-	func (c *clusterClient) RateDel(key string) error {
-		return c.Del(key).Err()
-	}
-	func (c *clusterClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
-		return c.EvalSha(sha1, keys, args...).Result()
-	}
-	func (c *clusterClient) RateScriptLoad(script string) (string, error) {
-		var sha1 string
-		err := c.ForEachMaster(func(client *redis.Client) error {
-			res, err := client.ScriptLoad(script).Result()
-			if err == nil {
-				sha1 = res
-			}
-			return err
-		})
-		return sha1, err
-	}
+    func (c *clusterClient) RateDel(key string) error {
+        return c.Del(key).Err()
+    }
+    func (c *clusterClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
+        return c.EvalSha(sha1, keys, args...).Result()
+    }
+    func (c *clusterClient) RateScriptLoad(script string) (string, error) {
+        var sha1 string
+        err := c.ForEachMaster(func(client *redis.Client) error {
+            res, err := client.ScriptLoad(script).Result()
+            if err == nil {
+                sha1 = res
+            }
+            return err
+        })
+        return sha1, err
+    }
 
 Uses it:
 
-	client := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-	})
-	limiter := ratelimiter.New(ratelimiter.Options{Client: redisClient{client}})
+    client := redis.NewClient(&redis.Options{
+        Addr: "localhost:6379",
+    })
+    limiter := ratelimiter.New(ratelimiter.Options{Client: redisClient{client}})
 */
 type RedisClient interface {
 	RateDel(string) error
@@ -130,20 +130,20 @@ func newRedisLimiter(opts *Options) *Limiter {
 /*
 Get get a limiter result:
 
-	userID := "user-123456"
-	res, err := limiter.Get(userID)
-	if err == nil {
-		fmt.Println(res.Reset)     // 2016-10-11 21:17:53.362 +0800 CST
-		fmt.Println(res.Total)     // 100
-		fmt.Println(res.Remaining) // 100
-		fmt.Println(res.Duration)  // 1m
-	}
+    userID := "user-123456"
+    res, err := limiter.Get(userID)
+    if err == nil {
+        fmt.Println(res.Reset)     // 2016-10-11 21:17:53.362 +0800 CST
+        fmt.Println(res.Total)     // 100
+        fmt.Println(res.Remaining) // 100
+        fmt.Println(res.Duration)  // 1m
+    }
 
 Get get a limiter result with custom limiter policy:
 
-	id := "id-123456"
-	policy := []int{100, 60000, 50, 60000, 50, 120000}
-	res, err := limiter.Get(id, policy...)
+    id := "id-123456"
+    policy := []int{100, 60000, 50, 60000, 50, 120000}
+    res, err := limiter.Get(id, policy...)
 */
 func (l *Limiter) Get(id string, policy ...int) (Result, error) {
 	var result Result
@@ -254,8 +254,17 @@ if limit[1] then
   res[2] = tonumber(limit[2])
   res[3] = tonumber(limit[3]) or ARGV[3]
   res[4] = tonumber(limit[4])
-
-  if res[1] >= 0 then
+  
+  if policyCount > 1 and res[1] == -1 then
+    redis.call('incr', statusKey)
+    redis.call('pexpire', statusKey, res[3] * 2)
+    local index = tonumber(redis.call('get', statusKey))
+    if index == 1 then
+      redis.call('incr', statusKey)
+    end
+  end
+  
+  if res[1] >= -1 then
     redis.call('hincrby', KEYS[1], 'ct', -1)
   else
     res[1] = -1
@@ -279,14 +288,6 @@ else
 
   redis.call('hmset', KEYS[1], 'ct', res[1], 'lt', res[2], 'dn', res[3], 'rt', res[4])
   redis.call('pexpire', KEYS[1], res[3])
-
-  if policyCount > 1 then
-    redis.call('incr', statusKey)
-    redis.call('pexpire', statusKey, res[3] * 2)
-    if index==1 then
-      redis.call('incr', statusKey)
-    end
-  end
 
 end
 
