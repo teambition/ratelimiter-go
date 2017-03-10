@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRateLimiter(t *testing.T) {
+func TestMemoryRateLimiter(t *testing.T) {
 	t.Run("ratelimiter with default Options should be", func(t *testing.T) {
 		assert := assert.New(t)
 
@@ -237,38 +237,12 @@ func TestRateLimiter(t *testing.T) {
 		assert.Equal(-1, res.Remaining)
 	})
 
-	// t.Run("ratelimiter with CleanDuration should be", func(t *testing.T) {
-	// 	assert := assert.New(t)
-	// 	limiter := New(Options{
-	// 		CleanDuration: 100 * time.Millisecond,
-	// 	})
-	// 	policy := []int{100, 100}
-	// 	id := genID()
-
-	// 	res, err := limiter.Get(id, policy...)
-	// 	assert.Nil(err)
-	// 	assert.Equal(100, res.Total)
-	// 	assert.Equal(99, res.Remaining)
-	// 	time.Sleep(res.Duration + time.Millisecond)
-	// 	res, err = limiter.Get(id, policy...)
-	// 	assert.Equal(100, res.Total)
-	// 	assert.Equal(99, res.Remaining)
-	// })
-	// t.Run("ratelimiter with CleanDuration should be", func(t *testing.T) {
-	// 	assert := assert.New(t)
-	// 	limiter := New(Options{})
-
-	// 	limiter.Get("1", []int{100, 100}...)
-	// 	limiter.Get("2", []int{100, 100}...)
-	// 	assert.Equal(2, limiter.Count())
-	// })
-
 	t.Run("limiter.Get with multi-policy for expired", func(t *testing.T) {
 		assert := assert.New(t)
+		limiter := New(Options{})
 
 		id := genID()
-		policy := []int{2, 100, 2, 200, 1, 200, 1, 300}
-		limiter := New(Options{})
+		policy := []int{2, 100, 2, 200, 3, 300, 3, 400}
 
 		//First policy
 		res, err := limiter.Get(id, policy...)
@@ -282,6 +256,7 @@ func TestRateLimiter(t *testing.T) {
 
 		res, err = limiter.Get(id, policy...)
 		assert.Equal(-1, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
 
 		//Second policy
 		time.Sleep(res.Duration + time.Millisecond)
@@ -299,64 +274,361 @@ func TestRateLimiter(t *testing.T) {
 		//Third policy
 		time.Sleep(res.Duration + time.Millisecond)
 		res, err = limiter.Get(id, policy...)
-		assert.Equal(1, res.Total)
-		assert.Equal(0, res.Remaining)
-		assert.Equal(time.Millisecond*200, res.Duration)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
 
+		res, err = limiter.Get(id, policy...)
+		res, err = limiter.Get(id, policy...)
 		res, err = limiter.Get(id, policy...)
 		assert.Equal(-1, res.Remaining)
 
 		// restore to First policy after Third policy*2 Duration
 		time.Sleep(res.Duration*2 + time.Millisecond)
 		res, err = limiter.Get(id, policy...)
+		assert.Nil(err)
 		assert.Equal(2, res.Total)
 		assert.Equal(1, res.Remaining)
 		assert.Equal(time.Millisecond*100, res.Duration)
+		res, err = limiter.Get(id, policy...)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(-1, res.Remaining)
 
 		//Second policy
 		time.Sleep(res.Duration + time.Millisecond)
 		res, err = limiter.Get(id, policy...)
 		assert.Equal(2, res.Total)
 		assert.Equal(1, res.Remaining)
-		assert.Equal(time.Millisecond*200, res.Duration)
 
 		res, err = limiter.Get(id, policy...)
 		assert.Equal(0, res.Remaining)
 
 		res, err = limiter.Get(id, policy...)
 		assert.Equal(-1, res.Remaining)
+		assert.Equal(time.Millisecond*200, res.Duration)
 
 		//Third policy
 		time.Sleep(res.Duration + time.Millisecond)
 		res, err = limiter.Get(id, policy...)
-		assert.Equal(1, res.Total)
-		assert.Equal(0, res.Remaining)
-		assert.Equal(time.Millisecond*200, res.Duration)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
 
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+
+		res, err = limiter.Get(id, policy...)
 		res, err = limiter.Get(id, policy...)
 		assert.Equal(-1, res.Remaining)
 
 		//Fourth policy
 		time.Sleep(res.Duration + time.Millisecond)
 		res, err = limiter.Get(id, policy...)
-		assert.Equal(1, res.Total)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*400, res.Duration)
+
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(1, res.Remaining)
+
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
 		assert.Equal(0, res.Remaining)
-		assert.Equal(time.Millisecond*300, res.Duration)
 
 		res, err = limiter.Get(id, policy...)
-		assert.Equal(1, res.Total)
-		assert.Equal(-1, res.Remaining)
-
-		res, err = limiter.Get(id, policy...)
-		assert.Equal(1, res.Total)
+		assert.Equal(3, res.Total)
 		assert.Equal(-1, res.Remaining)
 
 		// restore to First policy after Fourth policy*2 Duration
 		time.Sleep(res.Duration*2 + time.Millisecond)
 		res, err = limiter.Get(id, policy...)
+		assert.Nil(err)
 		assert.Equal(2, res.Total)
 		assert.Equal(1, res.Remaining)
 		assert.Equal(time.Millisecond*100, res.Duration)
+	})
+	t.Run("limiter.Get with multi-policy situation for expired", func(t *testing.T) {
+		assert := assert.New(t)
+
+		var id = genID()
+		limiter := New(Options{})
+		policy := []int{2, 150, 2, 200, 3, 300, 3, 400}
+
+		//用户访问数在第一个策略限制内
+		res, err := limiter.Get(id, policy...)
+		assert.Nil(err)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*150, res.Duration)
+
+		//第一个策略正常过期，第二次会继续走第一个
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*150, res.Duration)
+
+		//第一个策略超出
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(0, res.Remaining)
+		assert.Equal(time.Millisecond*150, res.Duration)
+
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(-1, res.Remaining)
+		assert.Equal(time.Millisecond*150, res.Duration)
+
+		// 超出后，等待第一个策略过期。
+		time.Sleep(res.Duration + time.Millisecond)
+		// 如果在第一个策略2倍时间内访问，走第二个策略。 如果不在恢复到第一个策略
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*200, res.Duration)
+
+		// 在第二个策略正常过期后，恢复到第一个策略
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*150, res.Duration)
+
+		//第一个策略又超出
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(0, res.Remaining)
+		assert.Equal(time.Millisecond*150, res.Duration)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(-1, res.Remaining)
+		assert.Equal(time.Millisecond*150, res.Duration)
+
+		//等待第一个策略过期，然后走第二个策略
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*200, res.Duration)
+
+		//第二个策略页超出
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(0, res.Remaining)
+		assert.Equal(time.Millisecond*200, res.Duration)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(-1, res.Remaining)
+		//等待第二个过期，走第三个，然后第三个超出
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+		res, err = limiter.Get(id, policy...)
+
+		assert.Equal(3, res.Total)
+		assert.Equal(0, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(-1, res.Remaining)
+
+		//等待第三个过期，走第四个，然后第四个也过期
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*400, res.Duration)
+
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(1, res.Remaining)
+
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(0, res.Remaining)
+
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(-1, res.Remaining)
+
+		//等待第四个策略过期，还是走第四个策略，因为还在第三个策略2倍时间内
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*400, res.Duration)
+
+		//第四个策略第二次过期，恢复走第一个。
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*150, res.Duration)
+
+	})
+	t.Run("limiter.Get with different policy time situation for expired", func(t *testing.T) {
+		assert := assert.New(t)
+
+		var id = genID()
+		limiter := New(Options{})
+		policy := []int{2, 300, 3, 100}
+
+		//默认走第一个策略
+		res, err := limiter.Get(id, policy...)
+		assert.Nil(err)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+
+		//第一个策略超出
+		res, err = limiter.Get(id, policy...)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(-1, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+
+		//等待第一个策略过期，然后走第二个策略
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+
+		//第一次正常过期
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+
+		///第二次正常过期
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+
+		///第三次正常过期，恢复到第一个
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Nil(err)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+
+		//==========然后第一个策略又超出了
+		res, err = limiter.Get(id, policy...)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(-1, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+
+		//等待第一个策略过期，
+		time.Sleep(res.Duration + time.Millisecond)
+		//走第二个策略（第一次），
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+
+		// 第二个策略超过，
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(0, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+
+		//等待过期
+		time.Sleep(res.Duration + time.Millisecond)
+
+		//走第二个策略（第二次），在第二个策略二倍时间内
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+
+		//第二个策略继续超出，延长2倍时间
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(0, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+
+		//等待过期
+		time.Sleep(res.Duration + time.Millisecond)
+		//然后走第二个策略，在第二个策略二倍时间内（被延长过）。  如果一直超出被停留在第二次
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*100, res.Duration)
+
+		//第二个策略第二次过期了，没有被延长
+		time.Sleep(res.Duration + time.Millisecond)
+		//恢复到第一个
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Nil(err)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+	})
+	t.Run("limiter.Get with normal situation for expired", func(t *testing.T) {
+		assert := assert.New(t)
+
+		var id = genID()
+		limiter := New(Options{})
+		policy := []int{3, 300, 2, 200}
+
+		res, err := limiter.Get(id, policy...)
+		assert.Nil(err)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(0, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(-1, res.Remaining)
+
+		//等待过期，然后走第二个
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*200, res.Duration)
+
+		//第二策略正常过期
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(2, res.Total)
+		assert.Equal(1, res.Remaining)
+		assert.Equal(time.Millisecond*200, res.Duration)
+
+		//第二策略第二次正常过期，恢复到第一个
+		time.Sleep(res.Duration + time.Millisecond)
+		res, err = limiter.Get(id, policy...)
+		assert.Equal(3, res.Total)
+		assert.Equal(2, res.Remaining)
+		assert.Equal(time.Millisecond*300, res.Duration)
+
 	})
 }
 func genID() string {

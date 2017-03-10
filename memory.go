@@ -106,53 +106,60 @@ func (m *memoryLimiter) clean() {
 
 func (m *memoryLimiter) getItem(key string, args ...int) (res *limiterCacheItem) {
 	policyCount := len(args) / 2
-	total := args[0]
-	duration := args[1]
 	statusKey := "{" + key + "}:S"
 
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	var ok bool
-	if res, ok = m.store[key]; ok {
-		statusItem, _ := m.status[statusKey]
-		if res.expire.Before(time.Now()) {
-			if policyCount > 1 {
-				if statusItem.expire.Before(time.Now()) {
-					statusItem.index = 1
-				} else {
-					if statusItem.index >= policyCount {
-						statusItem.index = policyCount
-					} else {
-						statusItem.index++
-					}
-				}
-				total = args[(statusItem.index*2)-2]
-				duration = args[(statusItem.index*2)-1]
-				statusItem.expire = time.Now().Add(time.Duration(duration) * time.Millisecond * 2)
-			}
-			res.total = total
-			res.remaining = total - 1
-			res.duration = time.Duration(duration) * time.Millisecond
-			res.expire = time.Now().Add(time.Duration(duration) * time.Millisecond)
-		} else {
-			if res.remaining == -1 {
-				return
-			}
-			res.remaining--
-		}
-	} else {
+	if res, ok = m.store[key]; !ok {
 		res = &limiterCacheItem{
-			total:     total,
-			remaining: total - 1,
-			duration:  time.Duration(duration) * time.Millisecond,
-			expire:    time.Now().Add(time.Duration(duration) * time.Millisecond),
-		}
-		status := &statusCacheItem{
-			index:  1,
-			expire: time.Now().Add(time.Duration(duration) * time.Millisecond * 2),
+			total:     args[0],
+			remaining: args[0] - 1,
+			duration:  time.Duration(args[1]) * time.Millisecond,
+			expire:    time.Now().Add(time.Duration(args[1]) * time.Millisecond),
 		}
 		m.store[key] = res
-		m.status[statusKey] = status
+		return
+	}
+	if res.expire.After(time.Now()) {
+		if policyCount > 1 && res.remaining-1 == -1 {
+			statusItem, ok := m.status[statusKey]
+			if ok {
+				statusItem.expire = time.Now().Add(res.duration * 2)
+				statusItem.index++
+			} else {
+				statusItem := &statusCacheItem{
+					index:  2,
+					expire: time.Now().Add(time.Duration(args[1]) * time.Millisecond * 2),
+				}
+				m.status[statusKey] = statusItem
+			}
+		}
+		if res.remaining >= 0 {
+			res.remaining--
+		} else {
+			res.remaining = -1
+		}
+	} else {
+		index := 1
+		if policyCount > 1 {
+			if statusItem, ok := m.status[statusKey]; ok {
+				if statusItem.expire.Before(time.Now()) {
+					index = 1
+				} else if statusItem.index > policyCount {
+					index = policyCount
+				} else {
+					index = statusItem.index
+				}
+				statusItem.index = index
+			}
+		}
+		total := args[(index*2)-2]
+		duration := args[(index*2)-1]
+		res.total = total
+		res.remaining = total - 1
+		res.duration = time.Duration(duration) * time.Millisecond
+		res.expire = time.Now().Add(time.Duration(duration) * time.Millisecond)
 	}
 	return
 }
