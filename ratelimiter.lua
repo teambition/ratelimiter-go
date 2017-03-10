@@ -28,7 +28,7 @@ if limit[1] then
     end
   end
 
-  if res[1] >= 0 then
+  if res[1] >= -1 then
     redis.call('hincrby', KEYS[1], 'ct', -1)
   else
     res[1] = -1
