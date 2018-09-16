@@ -113,4 +113,4 @@ The docs can be found at [godoc.org](https://godoc.org/github.com/teambition/rat
 
 ## License
 `ratelimiter-go` is licensed under the [MIT](https://github.com/teambition/ratelimiter-go/blob/master/LICENSE) license.
-Copyright &copy; 2016 [Teambition](https://www.teambition.com).
+Copyright &copy; 2016-2018 [Teambition](https://www.teambition.com).

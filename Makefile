@@ -1,5 +1,5 @@
 test:
-	go test --race
+	go test --race -v
 
 bench:
 	go test -bench=.
