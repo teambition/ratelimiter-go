@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	redis "github.com/go-redis/redis"
 	ratelimiter "github.com/teambition/ratelimiter-go"
-	redis "gopkg.in/redis.v5"
 )
 
 // Implements RedisClient for redis.Client
@@ -22,9 +22,11 @@ type redisClient struct {
 func (c *redisClient) RateDel(key string) error {
 	return c.Del(key).Err()
 }
+
 func (c *redisClient) RateEvalSha(sha1 string, keys []string, args ...interface{}) (interface{}, error) {
 	return c.EvalSha(sha1, keys, args...).Result()
 }
+
 func (c *redisClient) RateScriptLoad(script string) (string, error) {
 	return c.ScriptLoad(script).Result()
 }

@@ -41,7 +41,7 @@ import (
 	"time"
 
 	ratelimiter "github.com/teambition/ratelimiter-go"
-	redis "gopkg.in/redis.v5"
+	redis "github.com/go-redis/redis"
 )
 
 // Implements RedisClient for redis.Client

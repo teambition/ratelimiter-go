@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/teambition/ratelimiter-go"
-	"gopkg.in/redis.v5"
+	"github.com/go-redis/redis"
 )
 
 // Implements RedisClient for redis.Client

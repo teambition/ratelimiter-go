@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/go-redis/redis"
 	"github.com/teambition/ratelimiter-go"
-	"gopkg.in/redis.v5"
 )
 
 func ExampleRatelimiterGo() {
